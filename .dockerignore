@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+.planning
+.claude
+.agents
+*.md
+!Dockerfile
+.env*
+keolis-upload-auxerre/
+nul
+desktop.ini
+*.png
+*.xlsx
+QA_FAQ.md

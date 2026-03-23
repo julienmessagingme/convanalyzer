@@ -1,0 +1,22 @@
+# =============================================================================
+# Mieux Assure - Daily Analysis Pipeline Cron Job
+# =============================================================================
+#
+# Install this file on the server:
+#   sudo cp cron/mieuxassure-cron /etc/cron.d/mieuxassure
+#   sudo chmod 644 /etc/cron.d/mieuxassure
+#
+# BEFORE INSTALLING: Replace the two placeholders below:
+#   1. CRON_SECRET  -- must match the CRON_SECRET in .env.production
+#   2. REPLACE_WITH_WEBHOOK_URL -- Slack/Discord/other webhook for failure alerts
+#      (or remove the "|| curl ..." part if you don't want failure notifications)
+#
+# Runs daily at 2:00 AM server time.
+# Triggers: scoring, embeddings, clustering, and KB suggestions pipeline.
+# On failure, sends an alert via webhook POST.
+#
+# =============================================================================
+
+CRON_SECRET=REPLACE_WITH_REAL_SECRET
+
+0 2 * * * root curl -sf http://127.0.0.1:3000/analyze/api/cron/analyze -H "Authorization: Bearer $CRON_SECRET" >> /var/log/mieuxassure-cron.log 2>&1 || curl -sf -X POST https://REPLACE_WITH_WEBHOOK_URL -d '{"text":"[ALERT] Mieuxassure daily cron failed"}'
