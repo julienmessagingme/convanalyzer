@@ -12,40 +12,41 @@ export async function getWorkspaceMetrics(
 ) {
   const supabase = createServiceClient();
 
-  const { count: totalConversations } = await supabase
-    .from("conversations")
-    .select("*", { count: "exact", head: true })
-    .eq("workspace_id", workspaceId)
-    .gte("created_at", dateFrom)
-    .lte("created_at", `${dateTo}T23:59:59`);
-
-  // Count bot conversations only (IA)
-  const { count: botConversations } = await supabase
-    .from("conversations")
-    .select("*", { count: "exact", head: true })
-    .eq("workspace_id", workspaceId)
-    .eq("type", "bot")
-    .gte("created_at", dateFrom)
-    .lte("created_at", `${dateTo}T23:59:59`);
-
-  // Count escalated bot conversations (transferred to human)
-  const { count: escalatedConversations } = await supabase
-    .from("conversations")
-    .select("*", { count: "exact", head: true })
-    .eq("workspace_id", workspaceId)
-    .eq("type", "bot")
-    .eq("escalated", true)
-    .gte("created_at", dateFrom)
-    .lte("created_at", `${dateTo}T23:59:59`);
-
-  // Count agent conversations (human)
-  const { count: agentConversations } = await supabase
-    .from("conversations")
-    .select("*", { count: "exact", head: true })
-    .eq("workspace_id", workspaceId)
-    .eq("type", "agent")
-    .gte("created_at", dateFrom)
-    .lte("created_at", `${dateTo}T23:59:59`);
+  const [
+    { count: totalConversations },
+    { count: botConversations },
+    { count: escalatedConversations },
+    { count: agentConversations },
+  ] = await Promise.all([
+    supabase
+      .from("conversations")
+      .select("*", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId)
+      .gte("created_at", dateFrom)
+      .lte("created_at", `${dateTo}T23:59:59`),
+    supabase
+      .from("conversations")
+      .select("*", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId)
+      .eq("type", "bot")
+      .gte("created_at", dateFrom)
+      .lte("created_at", `${dateTo}T23:59:59`),
+    supabase
+      .from("conversations")
+      .select("*", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId)
+      .eq("type", "bot")
+      .eq("escalated", true)
+      .gte("created_at", dateFrom)
+      .lte("created_at", `${dateTo}T23:59:59`),
+    supabase
+      .from("conversations")
+      .select("*", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId)
+      .eq("type", "agent")
+      .gte("created_at", dateFrom)
+      .lte("created_at", `${dateTo}T23:59:59`),
+  ]);
 
   const total = totalConversations ?? 0;
   const botTotal = botConversations ?? 0;
@@ -78,7 +79,7 @@ export async function getTrendData(
     .select("created_at, failure_score, type")
     .eq("workspace_id", workspaceId)
     .gte("created_at", dateFrom)
-    .lte("created_at", dateTo)
+    .lte("created_at", `${dateTo}T23:59:59`)
     .order("created_at", { ascending: true });
 
   if (!conversations || conversations.length === 0) return [];

@@ -51,17 +51,18 @@ export default async function ConversationsPage({
   const allTags = (tagsData as Tag[]) ?? [];
 
   // Get counts for both tabs
-  const { count: botCount } = await supabase
-    .from("conversations")
-    .select("*", { count: "exact", head: true })
-    .eq("workspace_id", workspaceId)
-    .eq("type", "bot");
-
-  const { count: agentCount } = await supabase
-    .from("conversations")
-    .select("*", { count: "exact", head: true })
-    .eq("workspace_id", workspaceId)
-    .eq("type", "agent");
+  const [{ count: botCount }, { count: agentCount }] = await Promise.all([
+    supabase
+      .from("conversations")
+      .select("*", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId)
+      .eq("type", "bot"),
+    supabase
+      .from("conversations")
+      .select("*", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId)
+      .eq("type", "agent"),
+  ]);
 
   // If tag filter is set, find conversation IDs with that tag
   // Special case: "untagged" means conversations with NO tags at all

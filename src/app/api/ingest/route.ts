@@ -6,7 +6,6 @@ import { parseFormatA } from "@/lib/parsers/format-a";
 import { parseFormatB } from "@/lib/parsers/format-b";
 import { parseFormatC } from "@/lib/parsers/format-c";
 import { normalizedToMessageRow } from "@/lib/parsers/normalize";
-import { createTenantDAL } from "@/lib/supabase/dal";
 import { createServiceClient } from "@/lib/supabase/server";
 
 /**
@@ -42,12 +41,9 @@ export async function POST(request: Request) {
     }
 
     const payload = parseResult.data;
-
-    // 4. Create tenant DAL for this workspace
-    const dal = createTenantDAL(payload.workspace_id);
-
-    // 5. Verify workspace exists
     const supabase = createServiceClient();
+
+    // 4. Verify workspace exists
     const { data: workspace, error: wsError } = await supabase
       .from("workspaces")
       .select("id")
@@ -61,7 +57,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 6. Detect message format
+    // 5. Detect message format
     const format = detectFormat(payload.messages);
     if (format === "unknown") {
       return NextResponse.json(
@@ -70,7 +66,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 7. Parse messages with appropriate parser
+    // 6. Parse messages with appropriate parser
     //    Format C (UChat conversation synthesis) is used for both bot and agent
     //    The conversation_type field in the payload determines the type
     const { normalized, agentId } =
@@ -80,13 +76,13 @@ export async function POST(request: Request) {
           ? parseFormatC(payload.messages)
           : parseFormatB(payload.messages);
 
-    // 8. Determine conversation type
+    // 7. Determine conversation type
     //    Priority: explicit conversation_type field > format-based detection
     const conversationType: "agent" | "bot" =
       payload.conversation_type ??
       (format === "format-a" || format === "format-c" ? "agent" : "bot");
 
-    // 9. Determine timestamps from first/last messages
+    // 8. Determine timestamps from first/last messages
     const timestamps = normalized
       .map((m) => m.timestamp)
       .filter((t): t is string => t !== null);
@@ -94,20 +90,29 @@ export async function POST(request: Request) {
     const endedAt =
       timestamps.length > 0 ? timestamps[timestamps.length - 1] : null;
 
-    // 10. Upsert conversation (ON CONFLICT DO NOTHING via ignoreDuplicates)
-    //     With .select(), returns array: [row] if new, [] if duplicate.
-    const { data: upsertData, error: upsertError } =
-      await dal.upsertConversation({
-        external_id: payload.external_id,
-        client_id: payload.client_id,
-        type: conversationType,
-        agent_id: agentId,
-        message_count: normalized.length,
-        raw_payload: body,
-        started_at: startedAt,
-        ended_at: endedAt,
-        scoring_status: "pending",
-      });
+    // 9. Upsert conversation (ON CONFLICT DO NOTHING via ignoreDuplicates)
+    //    With .select(), returns array: [row] if new, [] if duplicate.
+    const { data: upsertData, error: upsertError } = await supabase
+      .from("conversations")
+      .upsert(
+        {
+          workspace_id: payload.workspace_id,
+          external_id: payload.external_id,
+          client_id: payload.client_id,
+          type: conversationType,
+          agent_id: agentId,
+          message_count: normalized.length,
+          raw_payload: body,
+          started_at: startedAt,
+          ended_at: endedAt,
+          scoring_status: "pending",
+        },
+        {
+          onConflict: "workspace_id,external_id",
+          ignoreDuplicates: true,
+        }
+      )
+      .select();
 
     if (upsertError) {
       console.error(
@@ -120,15 +125,17 @@ export async function POST(request: Request) {
       );
     }
 
-    // 11. Check for duplicate: upsert with ignoreDuplicates + .select()
+    // 10. Check for duplicate: upsert with ignoreDuplicates + .select()
     //     returns empty array when the row already existed (ON CONFLICT DO NOTHING)
     const upsertRows = upsertData as Record<string, unknown>[] | null;
     const isNew = Array.isArray(upsertRows) && upsertRows.length > 0;
 
     if (!isNew) {
       // Duplicate -- conversation already existed. Look up existing record.
-      const { data: existing } = await dal
-        .conversations()
+      const { data: existing } = await supabase
+        .from("conversations")
+        .select("*")
+        .eq("workspace_id", payload.workspace_id)
         .eq("external_id", payload.external_id)
         .single();
 
@@ -150,16 +157,16 @@ export async function POST(request: Request) {
       });
     }
 
-    // 12. New conversation -- get the conversation ID from upsert result
+    // 11. New conversation -- get the conversation ID from upsert result
     const conversationId = upsertRows[0].id as string;
 
-    // 13. Batch insert messages
+    // 12. Batch insert messages
     if (normalized.length > 0) {
       const messageRows = normalized.map((msg) =>
         normalizedToMessageRow(msg, conversationId, payload.workspace_id)
       );
 
-      const { error: msgError } = await dal.insertMessages(messageRows);
+      const { error: msgError } = await supabase.from("messages").insert(messageRows);
       if (msgError) {
         console.error(
           "[POST /api/ingest] Message insert error:",
@@ -172,7 +179,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // 14. Success response
+    // 13. Success response
     return NextResponse.json({
       conversation_id: conversationId,
       message_count: normalized.length,

@@ -34,6 +34,13 @@ export const scoreColors: Record<
   },
 };
 
+/** French labels for each score level */
+export const scoreLabelsFr: Record<ScoreLevel, string> = {
+  critical: "Critique",
+  warning: "Attention",
+  good: "Bon",
+};
+
 /** Format a score for display. Returns '--' for null values. */
 export function formatScore(score: number | null): string {
   if (score === null) return "--";

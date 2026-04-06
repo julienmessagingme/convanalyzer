@@ -5,32 +5,13 @@
  */
 
 import type { Conversation } from "@/types/database";
+import { getScoreLevel, scoreLabelsFr } from "@/lib/utils/scores";
+import { loadLogoAsBase64 } from "@/lib/utils/logo";
 
 export interface ConversationPdfData {
   conversation: Conversation;
   tags?: string[];
   failureReasons: string[];
-}
-
-async function loadLogoAsBase64(): Promise<string | null> {
-  try {
-    const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-    const res = await fetch(`${basePath}/logo-mieux-assure.png`);
-    const blob = await res.blob();
-    return await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
-  }
-}
-
-function getScoreLevelText(score: number): string {
-  if (score > 7) return "Critique";
-  if (score >= 4) return "Attention";
-  return "Bon";
 }
 
 export async function generateConversationPdf(data: ConversationPdfData) {
@@ -71,9 +52,11 @@ export async function generateConversationPdf(data: ConversationPdfData) {
       })
     : "Date inconnue";
 
+  const scoreLevelLabel = scoreLabelsFr[getScoreLevel(conv.failure_score)];
+
   const infoRows: string[][] = [
     ["Type", conv.type === "bot" ? "Bot" : "Agent"],
-    ["Score", `${conv.failure_score.toFixed(1)} (${getScoreLevelText(conv.failure_score)})`],
+    ["Score", `${conv.failure_score.toFixed(1)} (${scoreLevelLabel})`],
     ["Date", convDate],
     ["Nombre de messages", String(conv.message_count)],
     ["Statut scoring", conv.scoring_status || "Non evalue"],

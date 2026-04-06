@@ -1,4 +1,4 @@
-import { z } from "zod/v3";
+import { z } from "zod";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { getOpenAIClient } from "../openai/client";
 import { createServiceClient } from "../supabase/server";

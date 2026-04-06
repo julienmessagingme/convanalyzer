@@ -1,4 +1,4 @@
-import { z } from "zod/v3";
+import { z } from "zod";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { getOpenAIClient } from "../openai/client";
 import { createServiceClient } from "../supabase/server";
@@ -18,8 +18,8 @@ const MIN_CLUSTER_SIZE = 3;
 
 /**
  * Generates KB improvement suggestions from failed/ambiguous conversation clusters.
- * Groups conversations by topic, sends representative Q&A pairs to GPT-4o-mini,
- * and stores structured suggestions.
+ * Groups conversations by tag (via conversation_tags), sends representative Q&A pairs
+ * to GPT-4o-mini, and stores structured suggestions.
  *
  * Full-refresh strategy: deletes existing suggestions before inserting new ones.
  * Per-cluster error isolation: single OpenAI failure does not abort remaining clusters.
@@ -77,11 +77,6 @@ export async function generateKbSuggestions(
     return 0;
   }
 
-  // 3. Get topic assignments via message_topics join
-  const clientMessageIds = (messages ?? [])
-    .filter((m) => m.sender_type === "client")
-    .map((m) => m.id as string);
-
   // Build conversation -> messages map
   const convMessageMap = new Map<
     string,
@@ -101,53 +96,39 @@ export async function generateKbSuggestions(
     convMessageMap.set(convId, entry);
   }
 
-  // 4. Get topic assignments to group conversations by topic
-  const topicConvMap = new Map<string, Set<string>>();
+  // 3. Group conversations by tag via conversation_tags
+  const tagConvMap = new Map<string, Set<string>>();
 
-  if (clientMessageIds.length > 0) {
-    // Query in batches to avoid payload limits
-    for (let i = 0; i < clientMessageIds.length; i += 500) {
-      const batch = clientMessageIds.slice(i, i + 500);
-      const { data: msgTopics } = await supabase
-        .from("message_topics")
-        .select("message_id, topic_id")
-        .in("message_id", batch);
+  const { data: convTags } = await supabase
+    .from("conversation_tags")
+    .select("conversation_id, tag_id")
+    .in("conversation_id", conversationIds);
 
-      if (msgTopics) {
-        for (const mt of msgTopics) {
-          const topicId = mt.topic_id as string;
-          const msgId = mt.message_id as string;
-
-          // Find which conversation this message belongs to
-          const convForMsg = (messages ?? []).find(
-            (m) => (m.id as string) === msgId
-          );
-          if (convForMsg) {
-            const convSet = topicConvMap.get(topicId) ?? new Set<string>();
-            convSet.add(convForMsg.conversation_id as string);
-            topicConvMap.set(topicId, convSet);
-          }
-        }
-      }
+  if (convTags && convTags.length > 0) {
+    for (const ct of convTags) {
+      const tagId = ct.tag_id as string;
+      const convSet = tagConvMap.get(tagId) ?? new Set<string>();
+      convSet.add(ct.conversation_id as string);
+      tagConvMap.set(tagId, convSet);
     }
   }
 
-  // If no topic assignments, group all conversations into one cluster
-  if (topicConvMap.size === 0) {
+  // Conversations with no tags → "ungrouped" cluster
+  if (tagConvMap.size === 0) {
     const allSet = new Set(conversationIds);
-    topicConvMap.set("ungrouped", allSet);
+    tagConvMap.set("ungrouped", allSet);
   }
 
-  // 5. Full refresh: delete existing kb_suggestions for this workspace
+  // 4. Full refresh: delete existing kb_suggestions for this workspace
   await supabase
     .from("kb_suggestions")
     .delete()
     .eq("workspace_id", workspaceId);
 
-  // 6. For each topic cluster with >= MIN_CLUSTER_SIZE conversations, generate suggestion
+  // 5. For each tag cluster with >= MIN_CLUSTER_SIZE conversations, generate suggestion
   let suggestionsGenerated = 0;
 
-  const topicEntries = Array.from(topicConvMap.entries());
+  const topicEntries = Array.from(tagConvMap.entries());
 
   for (const [, convIds] of topicEntries) {
     const clusterConvIds = Array.from(convIds);
@@ -189,7 +170,7 @@ export async function generateKbSuggestions(
 
     if (summaries.length === 0) continue;
 
-    // 7. Call GPT-4o-mini with zodResponseFormat
+    // 6. Call GPT-4o-mini with zodResponseFormat
     try {
       const response = await openai.chat.completions.parse({
         model: LLM_MODEL,
