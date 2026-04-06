@@ -39,7 +39,7 @@ export async function runAnalysisPipeline(): Promise<PipelineResult> {
   // Step 1: Embed pending client messages
   try {
     console.log("[pipeline] Step 1: Embedding pending client messages...");
-    embedded = await embedPendingMessages(200);
+    embedded = await embedPendingMessages(2000);
     console.log(`[pipeline] Step 1: Embedded ${embedded} messages`);
   } catch (err) {
     const msg = `Embedding failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -47,10 +47,10 @@ export async function runAnalysisPipeline(): Promise<PipelineResult> {
     errors.push(msg);
   }
 
-  // Step 2: Rule-score pending bot conversations
+  // Step 2: Rule-score pending conversations
   try {
     console.log("[pipeline] Step 2: Rule-scoring pending conversations...");
-    ruleScored = await scorePendingConversations(10);
+    ruleScored = await scorePendingConversations(500);
     console.log(`[pipeline] Step 2: Rule-scored ${ruleScored} conversations`);
   } catch (err) {
     const msg = `Rule scoring failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -61,7 +61,7 @@ export async function runAnalysisPipeline(): Promise<PipelineResult> {
   // Step 3: LLM-score rule-scored conversations
   try {
     console.log("[pipeline] Step 3: LLM-scoring scored conversations...");
-    llmScored = await llmScorePendingConversations(5);
+    llmScored = await llmScorePendingConversations(100);
     console.log(`[pipeline] Step 3: LLM-scored ${llmScored} conversations`);
   } catch (err) {
     const msg = `LLM scoring failed: ${err instanceof Error ? err.message : String(err)}`;

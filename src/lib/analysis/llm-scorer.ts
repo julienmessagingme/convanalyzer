@@ -6,8 +6,9 @@ import { createServiceClient } from "../supabase/server";
 // --- Constants ---
 const DEFAULT_LIMIT = 5;
 const LLM_MODEL = "gpt-4o-mini";
+const CONCURRENCY = 10;
 
-const SENTIMENT_URGENCY_PROMPT = `Tu analyses une conversation entre un client et un chatbot d'assurance auto.
+const SENTIMENT_URGENCY_PROMPT = `Tu analyses une conversation entre un client et un chatbot ou un conseiller d'assurance.
 Evalue deux dimensions:
 
 1. SENTIMENT: le sentiment global du client sur toute la conversation.
@@ -103,7 +104,6 @@ export async function llmScorePendingConversations(
     .from("conversations")
     .select("id, failure_score")
     .eq("scoring_status", "scored")
-    .eq("type", "bot")
     .limit(maxConversations);
 
   if (queryError) {
@@ -120,102 +120,99 @@ export async function llmScorePendingConversations(
 
   let scoredCount = 0;
 
-  for (const conv of conversations as ConversationRow[]) {
-    try {
-      // Fetch messages
-      const { data: messages, error: msgError } = await supabase
-        .from("messages")
-        .select("sender_type, content, sequence")
-        .eq("conversation_id", conv.id)
-        .order("sequence", { ascending: true });
+  // Process conversations in parallel batches of CONCURRENCY
+  for (let i = 0; i < conversations.length; i += CONCURRENCY) {
+    const batch = (conversations as ConversationRow[]).slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map(async (conv) => {
+        // Fetch messages
+        const { data: messages, error: msgError } = await supabase
+          .from("messages")
+          .select("sender_type, content, sequence")
+          .eq("conversation_id", conv.id)
+          .order("sequence", { ascending: true });
 
-      if (msgError || !messages) {
-        console.error(
-          `[llm-scorer] Failed to fetch messages for ${conv.id}:`,
-          msgError?.message
-        );
-        await supabase
-          .from("conversations")
-          .update({ scoring_status: "llm_error" })
-          .eq("id", conv.id);
-        continue;
-      }
+        if (msgError || !messages) {
+          console.error(
+            `[llm-scorer] Failed to fetch messages for ${conv.id}:`,
+            msgError?.message
+          );
+          await supabase
+            .from("conversations")
+            .update({ scoring_status: "llm_error" })
+            .eq("id", conv.id);
+          return false;
+        }
 
-      const msgRows = messages as MessageRow[];
+        const msgRows = messages as MessageRow[];
 
-      if (msgRows.length === 0) {
-        await supabase
-          .from("conversations")
-          .update({ scoring_status: "llm_scored" })
-          .eq("id", conv.id);
-        scoredCount++;
-        continue;
-      }
+        if (msgRows.length === 0) {
+          await supabase
+            .from("conversations")
+            .update({ scoring_status: "llm_scored" })
+            .eq("id", conv.id);
+          return true;
+        }
 
-      // 1. Detect escalation (free, regex-based)
-      const isEscalated = detectEscalation(msgRows);
+        // 1. Detect escalation (free, regex-based)
+        const isEscalated = detectEscalation(msgRows);
 
-      // 2. Single LLM call: sentiment + urgency
-      const allMessages = msgRows
-        .filter((m) => m.content && m.content.trim())
-        .map(
-          (m) =>
-            `${m.sender_type === "client" ? "Client" : "Bot"}: ${m.content}`
-        )
-        .join("\n");
+        // 2. Single LLM call: sentiment + urgency
+        const allMessages = msgRows
+          .filter((m) => m.content && m.content.trim())
+          .map(
+            (m) =>
+              `${m.sender_type === "client" ? "Client" : "Bot"}: ${m.content}`
+          )
+          .join("\n");
 
-      let sentiment = 0;
-      let urgency = 0;
+        let sentiment = 0;
+        let urgency = 0;
 
-      try {
-        const response = await openai.chat.completions.parse({
-          model: LLM_MODEL,
-          messages: [
-            { role: "system", content: SENTIMENT_URGENCY_PROMPT },
-            { role: "user", content: allMessages },
-          ],
-          response_format: zodResponseFormat(
-            SentimentUrgencyResult,
-            "sentiment_urgency_result"
-          ),
-        });
-        const result = response.choices[0]?.message?.parsed;
-        if (result) {
-          sentiment = result.sentiment;
-          urgency = result.urgency;
-          console.log(
-            `[llm-scorer] ${conv.id}: sentiment=${sentiment} urgency=${urgency} escalated=${isEscalated}`
+        try {
+          const response = await openai.chat.completions.parse({
+            model: LLM_MODEL,
+            messages: [
+              { role: "system", content: SENTIMENT_URGENCY_PROMPT },
+              { role: "user", content: allMessages },
+            ],
+            response_format: zodResponseFormat(
+              SentimentUrgencyResult,
+              "sentiment_urgency_result"
+            ),
+          });
+          const result = response.choices[0]?.message?.parsed;
+          if (result) {
+            sentiment = result.sentiment;
+            urgency = result.urgency;
+          }
+        } catch (llmErr) {
+          console.error(
+            `[llm-scorer] LLM error for ${conv.id}:`,
+            llmErr instanceof Error ? llmErr.message : llmErr
           );
         }
-      } catch (llmErr) {
-        console.error(
-          `[llm-scorer] LLM error for ${conv.id}:`,
-          llmErr instanceof Error ? llmErr.message : llmErr
-        );
-      }
 
-      // 3. Update conversation
-      await supabase
-        .from("conversations")
-        .update({
-          sentiment_score: sentiment,
-          urgency_score: urgency,
-          escalated: isEscalated,
-          scoring_status: "llm_scored",
-        })
-        .eq("id", conv.id);
+        // 3. Update conversation
+        await supabase
+          .from("conversations")
+          .update({
+            sentiment_score: sentiment,
+            urgency_score: urgency,
+            escalated: isEscalated,
+            scoring_status: "llm_scored",
+          })
+          .eq("id", conv.id);
 
-      scoredCount++;
-    } catch (err) {
-      console.error(
-        `[llm-scorer] Error processing conversation ${conv.id}:`,
-        err instanceof Error ? err.message : err
-      );
-      await supabase
-        .from("conversations")
-        .update({ scoring_status: "llm_error" })
-        .eq("id", conv.id);
+        return true;
+      })
+    );
+
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value) scoredCount++;
     }
+
+    console.log(`[llm-scorer] Batch ${Math.floor(i / CONCURRENCY) + 1}: ${scoredCount}/${conversations.length} scored`);
   }
 
   return scoredCount;

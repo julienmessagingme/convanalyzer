@@ -244,7 +244,6 @@ export async function scorePendingConversations(
     .from("conversations")
     .select("id, workspace_id, client_id, started_at")
     .eq("scoring_status", "pending")
-    .eq("type", "bot")
     .limit(maxConversations);
 
   if (queryError) {

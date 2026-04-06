@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
-  BarChart,
   Bar,
   XAxis,
   YAxis,
