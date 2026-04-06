@@ -26,16 +26,6 @@ export default async function SearchPage({
       ? "agent"
       : "bot";
 
-  // Fetch available tags for ConversationCard quick-assign
-  const supabase = createServiceClient();
-  const { data: tagsData } = await supabase
-    .from("tags")
-    .select("*")
-    .eq("workspace_id", workspaceId)
-    .order("conversation_count", { ascending: false });
-
-  const allTags = (tagsData as Tag[]) ?? [];
-
   // No query yet — show empty state
   if (!query) {
     return (
@@ -52,6 +42,16 @@ export default async function SearchPage({
       </div>
     );
   }
+
+  // Fetch available tags for ConversationCard quick-assign
+  const supabase = createServiceClient();
+  const { data: tagsData } = await supabase
+    .from("tags")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .order("conversation_count", { ascending: false });
+
+  const allTags = (tagsData as Tag[]) ?? [];
 
   // Run search
   const result = await searchConversations(workspaceId, query);
@@ -103,24 +103,9 @@ export default async function SearchPage({
         agentCount={result.groups.agent.count}
       />
 
-      {/* Match type badges + conversation list */}
+      {/* Conversation list */}
       {conversations.length > 0 ? (
         <div className="space-y-2">
-          {/* Match indicators */}
-          <div className="flex gap-3 text-xs text-gray-500">
-            <span className="inline-flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-blue-500" />
-              Texte exact
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-purple-500" />
-              Similarite semantique
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-green-500" />
-              Les deux
-            </span>
-          </div>
           <ConversationList
             conversations={conversations}
             tagMap={tagMap}

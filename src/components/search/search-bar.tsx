@@ -14,8 +14,9 @@ export function SearchBar() {
     e.preventDefault();
     const trimmed = query.trim();
     if (!trimmed) return;
-    const params = new URLSearchParams();
+    const params = new URLSearchParams(searchParams.toString());
     params.set("q", trimmed);
+    params.delete("page");
     router.push(`${pathname}?${params.toString()}`);
   };
 

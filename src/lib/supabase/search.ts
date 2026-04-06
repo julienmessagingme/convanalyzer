@@ -32,7 +32,9 @@ async function searchConversationsByText(
   query: string
 ): Promise<Map<string, string>> {
   const supabase = createServiceClient();
-  const pattern = `%${query}%`;
+  // Escape ILIKE wildcards so user input is treated as literal text
+  const escaped = query.replace(/[%_\\]/g, (ch) => `\\${ch}`);
+  const pattern = `%${escaped}%`;
 
   const { data } = await supabase
     .from("messages")
@@ -65,38 +67,47 @@ async function searchConversationsBySemantic(
   workspaceId: string,
   query: string
 ): Promise<Map<string, { snippet: string; similarity: number }>> {
-  const openai = getOpenAIClient();
-
-  const embeddingRes = await openai.embeddings.create({
-    model: "text-embedding-3-small",
-    input: query,
-  });
-
-  const queryEmbedding = embeddingRes.data[0].embedding;
-
-  const supabase = createServiceClient();
-  const { data, error } = await supabase.rpc("match_similar_messages", {
-    query_embedding: JSON.stringify(queryEmbedding),
-    match_threshold: 0.7,
-    match_count: 50,
-    filter_workspace_id: workspaceId,
-  });
-
   const results = new Map<string, { snippet: string; similarity: number }>();
-  if (data && !error) {
-    for (const row of data) {
-      const existing = results.get(row.conversation_id);
-      // Keep the highest similarity match per conversation
-      if (!existing || row.similarity > existing.similarity) {
-        const content = row.content || "";
-        results.set(row.conversation_id, {
-          snippet:
-            content.length > 150 ? content.slice(0, 150) + "..." : content,
-          similarity: row.similarity,
-        });
+
+  try {
+    const openai = getOpenAIClient();
+
+    const embeddingRes = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: query,
+    });
+
+    const queryEmbedding = embeddingRes.data[0].embedding;
+
+    const supabase = createServiceClient();
+    const { data, error } = await supabase.rpc("match_similar_messages", {
+      query_embedding: JSON.stringify(queryEmbedding),
+      match_threshold: 0.7,
+      match_count: 50,
+      filter_workspace_id: workspaceId,
+    });
+
+    if (data && !error) {
+      for (const row of data) {
+        const existing = results.get(row.conversation_id);
+        // Keep the highest similarity match per conversation
+        if (!existing || row.similarity > existing.similarity) {
+          const content = row.content || "";
+          results.set(row.conversation_id, {
+            snippet:
+              content.length > 150 ? content.slice(0, 150) + "..." : content,
+            similarity: row.similarity,
+          });
+        }
       }
     }
+  } catch (err) {
+    console.error(
+      "[search] Semantic search failed, falling back to text only:",
+      err instanceof Error ? err.message : err
+    );
   }
+
   return results;
 }
 

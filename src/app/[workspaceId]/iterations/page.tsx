@@ -80,9 +80,10 @@ export default async function IterationsPage({
     .eq("workspace_id", workspaceId)
     .eq("type", tab);
 
-  const messageCounts = (conversations ?? []).map(
-    (c) => (c as { message_count: number }).message_count
-  );
+  // Exclude conversations with 0 messages (no iterations)
+  const messageCounts = (conversations ?? [])
+    .map((c) => (c as { message_count: number }).message_count)
+    .filter((mc) => mc > 0);
 
   const buckets = computeBuckets(messageCounts);
   const totalConvs = messageCounts.length;
