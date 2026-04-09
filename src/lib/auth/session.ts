@@ -3,7 +3,14 @@ import bcrypt from "bcryptjs";
 import { cookies, headers } from "next/headers";
 import { createServiceClient } from "@/lib/supabase/server";
 import { verifySession } from "./jwt";
-import { COOKIE_NAME } from "./config";
+import {
+  COOKIE_NAME,
+  PROXY_HEADER_EMAIL,
+  PROXY_HEADER_ID,
+  PROXY_HEADER_SECRET,
+  SSO_TTL_SECONDS,
+  getProxyAuthSecret,
+} from "./config";
 import type { Session, LocalUserRow, UserRole, AuthType } from "./types";
 
 /**
@@ -200,24 +207,65 @@ export async function canAccessWorkspace(
 /**
  * Helper to read the session from the incoming request.
  *
- * Tries two sources in order:
- *  1. The `x-ca-session` synthetic header injected by middleware for the
- *     current request (used by SSO on the very first proxied request where
- *     the browser hasn't received the cookie yet).
- *  2. The `ca_session` cookie directly — always present for admin/local
- *     sessions and for returning SSO visits.
- *
- * The two-source strategy exists because Next.js middleware cannot set the
- * request cookies for the current request, only the response cookies.
+ * Tries three sources in order:
+ *  1. The `x-ca-session` synthetic header injected by middleware (edge).
+ *     Works when Vercel Edge propagates request-header rewrites to the
+ *     node runtime server components — which is inconsistent in practice.
+ *  2. The `ca_session` cookie directly. Always present for admin local
+ *     sessions and for returning SSO visits where the browser already
+ *     stored the cookie from a previous response.
+ *  3. The raw SSO proxy headers (X-Proxy-Secret + X-User-* + client host).
+ *     Covers the *very first* SSO request where the middleware set the
+ *     ca_session cookie on the response but the browser has not seen it
+ *     yet, so the current request has no cookie. Server components can
+ *     still validate the reverse-proxy headers directly because the
+ *     shared PROXY_AUTH_SECRET is the true source of trust.
  */
 export async function getSessionFromMiddlewareHeader(): Promise<Session | null> {
   const h = await headers();
+
+  // 1. Middleware-injected header
   const token = h.get("x-ca-session");
   if (token) {
     const session = await verifySession(token);
     if (session) return session;
   }
-  // Fallback: read the cookie directly. Covers the admin flow and returning
-  // SSO visits where the browser already holds a valid ca_session cookie.
-  return getSession();
+
+  // 2. Existing browser cookie
+  const cookieSession = await getSession();
+  if (cookieSession) return cookieSession;
+
+  // 3. Fresh SSO proxy headers (first visit)
+  const proxySecret = h.get(PROXY_HEADER_SECRET);
+  if (!proxySecret) return null;
+
+  let expectedSecret: string;
+  try {
+    expectedSecret = getProxyAuthSecret();
+  } catch {
+    return null;
+  }
+  if (proxySecret !== expectedSecret) return null;
+
+  const email = h.get(PROXY_HEADER_EMAIL);
+  const externalId = h.get(PROXY_HEADER_ID);
+  const clientHost = (
+    h.get("x-client-hostname") ??
+    h.get("x-forwarded-host") ??
+    ""
+  )
+    .toLowerCase()
+    .split(":")[0];
+  if (!email || !externalId || !clientHost) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    userId: `sso:${clientHost}:${externalId}`,
+    email: email.toLowerCase(),
+    role: "client",
+    authType: "sso",
+    externalHostname: clientHost,
+    iat: now,
+    exp: now + SSO_TTL_SECONDS,
+  };
 }
