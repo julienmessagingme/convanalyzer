@@ -74,11 +74,14 @@ export async function loginLocal(
 }
 
 /**
- * Upsert an SSO shadow user from proxy headers and return it.
+ * Find or create an SSO shadow user identified by (external_hostname,
+ * external_id).
  *
- * A shadow user is identified by (external_hostname, external_id). Uses the
- * partial unique index users_sso_lookup_unique_idx for atomic upsert — no
- * race condition on concurrent first-login requests.
+ * Uses a SELECT-then-INSERT/UPDATE pattern rather than PostgREST upsert,
+ * because the unique index users_sso_lookup_unique_idx is partial
+ * (WHERE external_hostname IS NOT NULL) and PostgREST cannot express the
+ * matching ON CONFLICT clause. The race window on concurrent first logins
+ * is handled by catching the unique-violation error and re-selecting.
  */
 export async function findOrCreateSsoUser(args: {
   externalHostname: string;
@@ -88,38 +91,75 @@ export async function findOrCreateSsoUser(args: {
 }): Promise<{ id: string; email: string; role: UserRole; authType: AuthType }> {
   const supabase = createServiceClient();
   const email = args.email.toLowerCase().trim();
+  const nowIso = new Date().toISOString();
 
-  const { data, error } = await supabase
+  // 1. Try to find existing shadow user
+  const existing = await supabase
     .from("users")
-    .upsert(
-      {
-        email,
-        role: args.role,
-        auth_type: "sso",
-        external_hostname: args.externalHostname,
-        external_id: args.externalId,
-        last_login_at: new Date().toISOString(),
-      },
-      {
-        onConflict: "external_hostname,external_id",
-        ignoreDuplicates: false,
-      }
-    )
+    .select("id, email, role")
+    .eq("external_hostname", args.externalHostname)
+    .eq("external_id", args.externalId)
+    .maybeSingle();
+
+  if (existing.data) {
+    // Fire-and-forget: bump last_login_at + keep email in sync with origin
+    void supabase
+      .from("users")
+      .update({ last_login_at: nowIso, email })
+      .eq("id", existing.data.id);
+    return {
+      id: existing.data.id,
+      email: existing.data.email,
+      role: existing.data.role as UserRole,
+      authType: "sso",
+    };
+  }
+
+  // 2. Insert a new shadow user
+  const inserted = await supabase
+    .from("users")
+    .insert({
+      email,
+      role: args.role,
+      auth_type: "sso",
+      external_hostname: args.externalHostname,
+      external_id: args.externalId,
+      last_login_at: nowIso,
+    })
     .select("id, email, role")
     .single();
 
-  if (error || !data) {
-    throw new Error(
-      `Failed to upsert SSO user: ${error?.message ?? "unknown"}`
-    );
+  if (inserted.data) {
+    return {
+      id: inserted.data.id,
+      email: inserted.data.email,
+      role: inserted.data.role as UserRole,
+      authType: "sso",
+    };
   }
 
-  return {
-    id: data.id,
-    email: data.email,
-    role: data.role as UserRole,
-    authType: "sso",
-  };
+  // 3. Race: another request inserted between our SELECT and INSERT.
+  // Re-select to pick up the winning row.
+  if (inserted.error?.code === "23505") {
+    const retry = await supabase
+      .from("users")
+      .select("id, email, role")
+      .eq("external_hostname", args.externalHostname)
+      .eq("external_id", args.externalId)
+      .single();
+    if (retry.data) {
+      return {
+        id: retry.data.id,
+        email: retry.data.email,
+        role: retry.data.role as UserRole,
+        authType: "sso",
+      };
+    }
+  }
+
+  throw new Error(
+    `Failed to upsert SSO user: ${inserted.error?.message ?? "unknown"}`
+  );
 }
 
 /**
