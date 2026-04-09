@@ -112,18 +112,28 @@ async function searchConversationsBySemantic(
 }
 
 /**
- * Orchestrator: runs text + semantic search in parallel,
+ * Orchestrator: runs text + semantic search based on mode,
  * merges results, fetches conversation metadata, groups by type.
  */
 export async function searchConversations(
   workspaceId: string,
-  query: string
+  query: string,
+  mode: "combined" | "text" | "semantic" = "combined"
 ): Promise<SearchResult> {
-  // Run both searches in parallel
-  const [textResults, semanticResults] = await Promise.all([
-    searchConversationsByText(workspaceId, query),
-    searchConversationsBySemantic(workspaceId, query),
-  ]);
+  // Run searches based on mode
+  let textResults = new Map<string, string>();
+  let semanticResults = new Map<string, { snippet: string; similarity: number }>();
+
+  if (mode === "combined") {
+    [textResults, semanticResults] = await Promise.all([
+      searchConversationsByText(workspaceId, query),
+      searchConversationsBySemantic(workspaceId, query),
+    ]);
+  } else if (mode === "text") {
+    textResults = await searchConversationsByText(workspaceId, query);
+  } else {
+    semanticResults = await searchConversationsBySemantic(workspaceId, query);
+  }
 
   // Merge conversation IDs
   const allConvIds = new Set<string>();

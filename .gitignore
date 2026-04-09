@@ -34,3 +34,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# editor / local tooling
+.claude/
+.idea/
+.vscode/
+
+# supabase CLI state
+supabase/.temp/
+
+# windows artifacts
+nul
+

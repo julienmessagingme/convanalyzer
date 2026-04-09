@@ -5,7 +5,7 @@ import { useCallback } from "react";
 
 interface PeriodSelectorProps {
   currentPeriod: string;
-  currentGranularity: string;
+  currentGranularity?: string;
 }
 
 const periods = [
@@ -97,21 +97,23 @@ export function PeriodSelector({
         )}
       </div>
 
-      <div className="flex items-center gap-1">
-        {granularities.map((g) => (
-          <button
-            key={g.value}
-            onClick={() => handleGranularityChange(g.value)}
-            className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
-              currentGranularity === g.value
-                ? "bg-gray-100 text-gray-900"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {g.label}
-          </button>
-        ))}
-      </div>
+      {currentGranularity && (
+        <div className="flex items-center gap-1">
+          {granularities.map((g) => (
+            <button
+              key={g.value}
+              onClick={() => handleGranularityChange(g.value)}
+              className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+                currentGranularity === g.value
+                  ? "bg-gray-100 text-gray-900"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

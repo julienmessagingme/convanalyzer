@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { fetchAllRows } from "@/lib/supabase/paginate";
 
 /**
  * GET /api/analytics?workspace_id=X&tag_ids=id1,id2&date_from=2026-01-01&date_to=2026-03-23&show_sentiment=1&show_urgency=1
@@ -31,11 +32,13 @@ export async function GET(req: NextRequest) {
     // For each tag, get the set of conversation_ids, then intersect
     const sets: Set<string>[] = [];
     for (const tagId of tagIds) {
-      const { data } = await supabase
-        .from("conversation_tags")
-        .select("conversation_id")
-        .eq("tag_id", tagId);
-      const ids = (data ?? []).map((r: { conversation_id: string }) => r.conversation_id);
+      const rows = await fetchAllRows<{ conversation_id: string }>(
+        supabase
+          .from("conversation_tags")
+          .select("conversation_id")
+          .eq("tag_id", tagId)
+      );
+      const ids = rows.map((r) => r.conversation_id);
       sets.push(new Set(ids));
     }
     // Intersect all sets
@@ -67,10 +70,13 @@ export async function GET(req: NextRequest) {
     query = query.in("id", conversationIds);
   }
 
-  const { data: conversations, error } = await query;
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  // Paginate to bypass PostgREST 1000-row limit
+  const conversations = await fetchAllRows<{
+    id: string;
+    created_at: string;
+    sentiment_score: number | null;
+    urgency_score: number | null;
+  }>(query);
 
   // Step 3: Group by day
   const dayMap = new Map<string, {
@@ -81,7 +87,7 @@ export async function GET(req: NextRequest) {
     urgencyCount: number;
   }>();
 
-  for (const conv of conversations ?? []) {
+  for (const conv of conversations) {
     const day = (conv.created_at ?? "").slice(0, 10); // YYYY-MM-DD
     if (!day) continue;
 

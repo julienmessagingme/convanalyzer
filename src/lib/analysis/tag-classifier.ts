@@ -1,11 +1,12 @@
-import { z } from "zod/v3";
+import { z } from "zod";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { getOpenAIClient } from "../openai/client";
 import { createServiceClient } from "../supabase/server";
+import { fetchAllRows } from "../supabase/paginate";
 import type { Tag } from "@/types/database";
 
 const LLM_MODEL = "gpt-4o-mini";
-const BATCH_SIZE = 5;
+const BATCH_SIZE = 10;
 const MIN_CONFIDENCE = 0.8;
 
 const SYSTEM_PROMPT = `Tu es un classifieur STRICT de conversations pour une assurance auto.
@@ -70,41 +71,37 @@ export async function classifyConversationTags(
   const tagIds = tags.map((t) => t.id);
 
   // Find ALL existing AI assignments (conversation_id + tag_id pairs)
-  const { data: existingAssignments } = await supabase
-    .from("conversation_tags")
-    .select("conversation_id, tag_id")
-    .in("tag_id", tagIds)
-    .eq("assigned_by", "ai");
+  const existingAssignments = await fetchAllRows<{ conversation_id: string; tag_id: string }>(
+    supabase
+      .from("conversation_tags")
+      .select("conversation_id, tag_id")
+      .in("tag_id", tagIds)
+      .eq("assigned_by", "ai")
+  );
 
   // Build a set of "convId:tagId" pairs that are already done
   const alreadyDone = new Set(
-    (existingAssignments ?? []).map(
+    existingAssignments.map(
       (a) => `${a.conversation_id}:${a.tag_id}`
     )
   );
 
-  // Find ALL conversations for this workspace
-  const { data: conversations, error: convError } = await supabase
-    .from("conversations")
-    .select("id")
-    .eq("workspace_id", workspaceId);
+  // Find ALL conversations for this workspace (paginated)
+  const conversations = await fetchAllRows<{ id: string }>(
+    supabase
+      .from("conversations")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+  );
 
-  if (convError) {
-    console.error(
-      "[tag-classifier] Failed to fetch conversations:",
-      convError.message
-    );
-    return 0;
-  }
-
-  if (!conversations || conversations.length === 0) {
+  if (conversations.length === 0) {
     return 0;
   }
 
   // For each conversation, find which tags still need to be tested
   const toClassify: { convId: string; tagsToTest: Tag[] }[] = [];
   for (const conv of conversations) {
-    const convId = conv.id as string;
+    const convId = conv.id;
     const missingTags = tags.filter(
       (t) => !alreadyDone.has(`${convId}:${t.id}`)
     );
@@ -128,36 +125,36 @@ export async function classifyConversationTags(
   let totalAssignments = 0;
   const tagCountIncrements = new Map<string, number>();
 
-  // Process in batches
+  // Process in concurrent batches
   for (let i = 0; i < toClassify.length; i += BATCH_SIZE) {
     const batch = toClassify.slice(i, i + BATCH_SIZE);
 
-    for (const { convId, tagsToTest } of batch) {
-      // Fetch client messages for this conversation
-      const { data: msgs } = await supabase
-        .from("messages")
-        .select("content")
-        .eq("conversation_id", convId)
-        .eq("sender_type", "client")
-        .order("sequence", { ascending: true });
+    const results = await Promise.allSettled(
+      batch.map(async ({ convId, tagsToTest }) => {
+        // Fetch client messages for this conversation
+        const { data: msgs } = await supabase
+          .from("messages")
+          .select("content")
+          .eq("conversation_id", convId)
+          .eq("sender_type", "client")
+          .order("sequence", { ascending: true });
 
-      if (!msgs || msgs.length === 0) continue;
+        if (!msgs || msgs.length === 0) return 0;
 
-      const conversationText = msgs
-        .map((m) => m.content as string)
-        .join("\n");
+        const conversationText = msgs
+          .map((m) => m.content as string)
+          .join("\n");
 
-      // Build tag list — only tags that haven't been tested yet for this conversation
-      const tagList = tagsToTest
-        .map(
-          (t) =>
-            `- ID: ${t.id} | Label: ${t.label}${t.description ? ` | Description: ${t.description}` : ""}`
-        )
-        .join("\n");
+        // Build tag list — only tags that haven't been tested yet for this conversation
+        const tagList = tagsToTest
+          .map(
+            (t) =>
+              `- ID: ${t.id} | Label: ${t.label}${t.description ? ` | Description: ${t.description}` : ""}`
+          )
+          .join("\n");
 
-      const testTagIds = new Set(tagsToTest.map((t) => t.id));
+        const testTagIds = new Set(tagsToTest.map((t) => t.id));
 
-      try {
         const response = await openai.chat.completions.parse({
           model: LLM_MODEL,
           messages: [
@@ -174,7 +171,7 @@ export async function classifyConversationTags(
         });
 
         const parsed = response.choices[0]?.message?.parsed;
-        if (!parsed) continue;
+        if (!parsed) return 0;
 
         // Filter by minimum confidence and only tags we're testing
         const validMatches = parsed.matches
@@ -183,7 +180,7 @@ export async function classifyConversationTags(
           )
           .sort((a, b) => b.confidence - a.confidence);
 
-        if (validMatches.length === 0) continue;
+        if (validMatches.length === 0) return 0;
 
         // Count existing tags on this conversation (human + ai)
         const { count: existingCount } = await supabase
@@ -192,7 +189,7 @@ export async function classifyConversationTags(
           .eq("conversation_id", convId);
 
         const slotsLeft = Math.max(0, 2 - (existingCount ?? 0));
-        if (slotsLeft === 0) continue;
+        if (slotsLeft === 0) return 0;
 
         // Keep only top matches within the 2-tag limit
         const cappedMatches = validMatches.slice(0, slotsLeft);
@@ -214,10 +211,8 @@ export async function classifyConversationTags(
             `[tag-classifier] Failed to insert tags for conversation ${convId}:`,
             insertError.message
           );
-          continue;
+          return 0;
         }
-
-        totalAssignments += cappedMatches.length;
 
         // Track count increments per tag
         for (const m of cappedMatches) {
@@ -226,12 +221,24 @@ export async function classifyConversationTags(
             (tagCountIncrements.get(m.tag_id) ?? 0) + 1
           );
         }
-      } catch (err) {
-        console.error(
-          `[tag-classifier] Failed to classify conversation ${convId}:`,
-          err instanceof Error ? err.message : err
-        );
+
+        return cappedMatches.length;
+      })
+    );
+
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        totalAssignments += r.value;
+      } else {
+        console.error("[tag-classifier] Batch item failed:", r.reason);
       }
+    }
+
+    // Log progress every batch
+    if ((i + BATCH_SIZE) % 100 === 0 || i + BATCH_SIZE >= toClassify.length) {
+      console.log(
+        `[tag-classifier] Progress: ${Math.min(i + BATCH_SIZE, toClassify.length)}/${toClassify.length} conversations processed, ${totalAssignments} assignments so far`
+      );
     }
   }
 

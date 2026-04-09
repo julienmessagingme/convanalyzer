@@ -1,7 +1,8 @@
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { Search } from "lucide-react";
 import type { Tag } from "@/types/database";
 
 interface FilterBarProps {
@@ -14,6 +15,13 @@ export function FilterBar({ tags, currentFilters, activeTab }: FilterBarProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
+
+  const [localQuery, setLocalQuery] = useState<string>(currentFilters.q ?? "");
+
+  // Keep local query in sync with URL when navigating
+  useEffect(() => {
+    setLocalQuery(currentFilters.q ?? "");
+  }, [currentFilters.q]);
 
   const updateFilter = useCallback(
     (key: string, value: string) => {
@@ -30,9 +38,50 @@ export function FilterBar({ tags, currentFilters, activeTab }: FilterBarProps) {
     [router, searchParams, pathname]
   );
 
+  const submitQuery = useCallback(() => {
+    const trimmed = localQuery.trim();
+    const current = currentFilters.q ?? "";
+    if (trimmed === current) return;
+    updateFilter("q", trimmed);
+  }, [localQuery, currentFilters.q, updateFilter]);
+
+  const hasQuery = (currentFilters.q ?? "").trim().length > 0;
+
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex gap-3 items-center flex-wrap">
+        {/* Keyword search */}
+        <div className="flex items-center gap-2 flex-1 min-w-[240px] max-w-md">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+            <input
+              type="search"
+              placeholder="Rechercher (mot-cle)..."
+              value={localQuery}
+              onChange={(e) => setLocalQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  submitQuery();
+                }
+              }}
+              onBlur={submitQuery}
+              className="w-full border border-gray-300 rounded-md pl-8 pr-2 py-1.5 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          {hasQuery && (
+            <select
+              value={currentFilters.mode ?? "combined"}
+              onChange={(e) => updateFilter("mode", e.target.value)}
+              className="border border-gray-300 rounded-md px-2 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="combined">Combine</option>
+              <option value="text">Texte</option>
+              <option value="semantic">Semantique</option>
+            </select>
+          )}
+        </div>
+
         <div className="flex items-center gap-2">
           <label htmlFor="date_from" className="text-sm text-gray-600">
             Du

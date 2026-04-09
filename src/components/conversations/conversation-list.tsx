@@ -25,7 +25,7 @@ export function ConversationList({
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+    <div className="flex flex-col gap-3">
       {conversations.map((conversation) => (
         <ConversationCard
           key={conversation.id}

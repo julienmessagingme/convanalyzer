@@ -1,7 +1,8 @@
-import { z } from "zod/v3";
+import { z } from "zod";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { getOpenAIClient } from "../openai/client";
 import { createServiceClient } from "../supabase/server";
+import { fetchAllRows } from "../supabase/paginate";
 
 // --- Constants ---
 const DEFAULT_LIMIT = 5;
@@ -100,23 +101,19 @@ export async function llmScorePendingConversations(
   const openai = getOpenAIClient();
   const maxConversations = limit ?? DEFAULT_LIMIT;
 
-  const { data: conversations, error: queryError } = await supabase
-    .from("conversations")
-    .select("id, failure_score")
-    .eq("scoring_status", "scored")
-    .limit(maxConversations);
+  // Paginate to bypass PostgREST 1000-row limit, then cap to maxConversations
+  const allConversations = await fetchAllRows<ConversationRow>(
+    supabase
+      .from("conversations")
+      .select("id, failure_score")
+      .eq("scoring_status", "scored")
+  );
 
-  if (queryError) {
-    console.error(
-      "[llm-scorer] Failed to query scored conversations:",
-      queryError.message
-    );
+  if (allConversations.length === 0) {
     return 0;
   }
 
-  if (!conversations || conversations.length === 0) {
-    return 0;
-  }
+  const conversations = allConversations.slice(0, maxConversations);
 
   let scoredCount = 0;
 

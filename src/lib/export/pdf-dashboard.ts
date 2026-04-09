@@ -15,12 +15,6 @@ export interface DashboardPdfData {
     tauxTransfert: number;
   };
   tags: Array<{ label: string; conversation_count: number }>;
-  trendData: Array<{
-    date: string;
-    conversations: number;
-    failures: number;
-    tauxEchec: number;
-  }>;
 }
 
 export async function generateDashboardPdf(data: DashboardPdfData) {
@@ -70,31 +64,6 @@ export async function generateDashboardPdf(data: DashboardPdfData) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   y = (doc as any).lastAutoTable.finalY + 12;
-
-  // Trend data table
-  if (data.trendData.length > 0) {
-    doc.setFontSize(14);
-    doc.setTextColor(31, 41, 55);
-    doc.text("Tendances", 14, y);
-    y += 2;
-
-    autoTable(doc, {
-      startY: y,
-      head: [["Date", "Conversations", "Echecs", "Taux d'echec"]],
-      body: data.trendData.map((row) => [
-        row.date,
-        String(row.conversations),
-        String(row.failures),
-        `${row.tauxEchec.toFixed(1)}%`,
-      ]),
-      headStyles: { fillColor: [59, 130, 246] },
-      styles: { fontSize: 9 },
-      margin: { left: 14 },
-    });
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    y = (doc as any).lastAutoTable.finalY + 12;
-  }
 
   // Tags table
   if (data.tags.length > 0) {

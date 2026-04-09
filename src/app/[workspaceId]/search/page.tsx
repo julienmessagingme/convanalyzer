@@ -3,7 +3,7 @@ import { searchConversations } from "@/lib/supabase/search";
 import { SearchBar } from "@/components/search/search-bar";
 import { SearchGroupStats } from "@/components/search/search-group-stats";
 import { ConversationTabs } from "@/components/conversations/conversation-tabs";
-import { ConversationList } from "@/components/conversations/conversation-list";
+import { ConversationCard } from "@/components/conversations/conversation-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Search } from "lucide-react";
 import type { Tag } from "@/types/database";
@@ -21,6 +21,9 @@ export default async function SearchPage({
   const filters = await searchParams;
 
   const query = typeof filters.q === "string" ? filters.q.trim() : "";
+  const mode = typeof filters.mode === "string" && ["text", "semantic", "combined"].includes(filters.mode)
+    ? (filters.mode as "text" | "semantic" | "combined")
+    : "combined";
   const tab =
     typeof filters.tab === "string" && filters.tab === "agent"
       ? "agent"
@@ -53,20 +56,11 @@ export default async function SearchPage({
 
   const allTags = (tagsData as Tag[]) ?? [];
 
-  // Run search
-  const result = await searchConversations(workspaceId, query);
+  // Run search with mode
+  const result = await searchConversations(workspaceId, query, mode);
 
-  // Get conversations for active tab
+  // Get matches for active tab
   const activeGroup = result.groups[tab];
-  const conversations = activeGroup.conversations.map((m) => m.conversation);
-
-  // Build tagMap from search results
-  const tagMap: Record<string, { id: string; label: string }[]> = {};
-  for (const match of activeGroup.conversations) {
-    if (match.tags.length > 0) {
-      tagMap[match.conversation.id] = match.tags;
-    }
-  }
 
   return (
     <div className="space-y-6">
@@ -80,6 +74,11 @@ export default async function SearchPage({
         {result.totalCount} conversation{result.totalCount !== 1 ? "s" : ""}{" "}
         trouvee{result.totalCount !== 1 ? "s" : ""} pour{" "}
         <span className="font-medium text-gray-700">&laquo;{result.query}&raquo;</span>
+        {mode !== "combined" && (
+          <span className="ml-2 text-xs text-gray-400">
+            (mode: {mode === "text" ? "texte exact" : "semantique"})
+          </span>
+        )}
       </p>
 
       {/* Stats cards */}
@@ -103,15 +102,20 @@ export default async function SearchPage({
         agentCount={result.groups.agent.count}
       />
 
-      {/* Conversation list */}
-      {conversations.length > 0 ? (
-        <div className="space-y-2">
-          <ConversationList
-            conversations={conversations}
-            tagMap={tagMap}
-            workspaceId={workspaceId}
-            availableTags={allTags}
-          />
+      {/* Conversation list - vertical with match info */}
+      {activeGroup.conversations.length > 0 ? (
+        <div className="flex flex-col gap-3">
+          {activeGroup.conversations.map((match) => (
+            <ConversationCard
+              key={match.conversation.id}
+              conversation={match.conversation}
+              workspaceId={workspaceId}
+              tags={match.tags}
+              availableTags={allTags}
+              matchType={match.matchType}
+              matchedSnippet={match.matchedSnippet}
+            />
+          ))}
         </div>
       ) : (
         <EmptyState

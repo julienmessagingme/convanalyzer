@@ -1,11 +1,15 @@
+import Link from "next/link";
 import { createServiceClient } from "@/lib/supabase/server";
 import { FilterBar } from "@/components/conversations/filter-bar";
 import { ConversationList } from "@/components/conversations/conversation-list";
 import { ConversationTabs } from "@/components/conversations/conversation-tabs";
 import { Pagination } from "@/components/conversations/pagination";
 import { ExportCsvButton } from "@/components/export/export-csv-button";
+import { searchConversations } from "@/lib/supabase/search";
 import type { Conversation, Tag } from "@/types/database";
 import type { CsvConversationRow } from "@/lib/export/csv";
+
+const INT_REGEX = /^-?\d+$/;
 
 const PAGE_SIZE = 20;
 
@@ -39,6 +43,33 @@ export default async function ConversationsPage({
   const escalated =
     typeof filters.escalated === "string" ? filters.escalated : undefined;
 
+  // Exact-score filters from matrix click-through
+  const sentimentScoreRaw =
+    typeof filters.sentiment_score === "string"
+      ? filters.sentiment_score
+      : undefined;
+  const urgencyScoreRaw =
+    typeof filters.urgency_score === "string"
+      ? filters.urgency_score
+      : undefined;
+  const sentimentScore =
+    sentimentScoreRaw && INT_REGEX.test(sentimentScoreRaw)
+      ? parseInt(sentimentScoreRaw, 10)
+      : undefined;
+  const urgencyScore =
+    urgencyScoreRaw && INT_REGEX.test(urgencyScoreRaw)
+      ? parseInt(urgencyScoreRaw, 10)
+      : undefined;
+
+  // Keyword search
+  const q =
+    typeof filters.q === "string" && filters.q.trim().length > 0
+      ? filters.q.trim()
+      : undefined;
+  const modeRaw = typeof filters.mode === "string" ? filters.mode : undefined;
+  const mode: "combined" | "text" | "semantic" =
+    modeRaw === "text" || modeRaw === "semantic" ? modeRaw : "combined";
+
   const supabase = createServiceClient();
 
   // Fetch tags for filter dropdown
@@ -63,6 +94,25 @@ export default async function ConversationsPage({
       .eq("workspace_id", workspaceId)
       .eq("type", "agent"),
   ]);
+
+  // Keyword search: collect matching conversation IDs (intersected with tag filter later)
+  let keywordConvIds: string[] | undefined;
+  if (q) {
+    try {
+      const searchResult = await searchConversations(workspaceId, q, mode);
+      const ids: string[] = [];
+      for (const m of searchResult.groups.bot.conversations) {
+        ids.push(m.conversation.id);
+      }
+      for (const m of searchResult.groups.agent.conversations) {
+        ids.push(m.conversation.id);
+      }
+      keywordConvIds = ids;
+    } catch (err) {
+      console.error("[conversations page] keyword search failed:", err);
+      keywordConvIds = [];
+    }
+  }
 
   // If tag filter is set, find conversation IDs with that tag
   // Special case: "untagged" means conversations with NO tags at all
@@ -133,17 +183,35 @@ export default async function ConversationsPage({
   } else if (escalated === "no") {
     query = query.eq("escalated", false);
   }
+  // Exact-score filters (from matrix click)
+  if (sentimentScore !== undefined) {
+    query = query.eq("sentiment_score", sentimentScore);
+  }
+  if (urgencyScore !== undefined) {
+    query = query.eq("urgency_score", urgencyScore);
+  }
   if (dateFrom) {
     query = query.gte("created_at", dateFrom);
   }
   if (dateTo) {
     query = query.lte("created_at", `${dateTo}T23:59:59`);
   }
-  if (tagConvIds !== undefined) {
-    if (tagConvIds.length === 0) {
+
+  // Intersect tag and keyword ID filters
+  let idFilter: string[] | undefined;
+  if (tagConvIds !== undefined && keywordConvIds !== undefined) {
+    const keywordSet = new Set(keywordConvIds);
+    idFilter = tagConvIds.filter((id) => keywordSet.has(id));
+  } else if (tagConvIds !== undefined) {
+    idFilter = tagConvIds;
+  } else if (keywordConvIds !== undefined) {
+    idFilter = keywordConvIds;
+  }
+  if (idFilter !== undefined) {
+    if (idFilter.length === 0) {
       query = query.in("id", ["__no_match__"]);
     } else {
-      query = query.in("id", tagConvIds);
+      query = query.in("id", idFilter);
     }
   }
 
@@ -222,11 +290,30 @@ export default async function ConversationsPage({
     "urgency",
     "escalated",
     "tag",
+    "sentiment_score",
+    "urgency_score",
+    "q",
+    "mode",
   ]) {
     const val = filters[key];
     if (typeof val === "string") {
       currentFilters[key] = val;
     }
+  }
+
+  // Build "clear matrix filter" URL preserving everything else
+  const matrixFilterActive =
+    sentimentScore !== undefined || urgencyScore !== undefined;
+  let clearMatrixHref = "";
+  if (matrixFilterActive) {
+    const cleared = new URLSearchParams();
+    for (const [k, v] of Object.entries(currentFilters)) {
+      if (k === "sentiment_score" || k === "urgency_score") continue;
+      cleared.set(k, v);
+    }
+    if (tab !== "bot") cleared.set("tab", tab);
+    const qs = cleared.toString();
+    clearMatrixHref = qs ? `?${qs}` : "";
   }
 
   return (
@@ -243,6 +330,32 @@ export default async function ConversationsPage({
       />
 
       <FilterBar tags={allTags} currentFilters={currentFilters} activeTab={tab} />
+
+      {matrixFilterActive && (
+        <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+          <div className="text-sm text-blue-900">
+            <span className="font-semibold">Filtre matrice actif :</span>{" "}
+            {urgencyScore !== undefined && (
+              <span>Urgence = {urgencyScore}</span>
+            )}
+            {urgencyScore !== undefined && sentimentScore !== undefined && (
+              <span> · </span>
+            )}
+            {sentimentScore !== undefined && (
+              <span>
+                Sentiment ={" "}
+                {sentimentScore > 0 ? `+${sentimentScore}` : sentimentScore}
+              </span>
+            )}
+          </div>
+          <Link
+            href={clearMatrixHref || "?"}
+            className="text-sm text-blue-700 hover:text-blue-900 font-medium"
+          >
+            Effacer
+          </Link>
+        </div>
+      )}
 
       <ConversationList
         conversations={convList}

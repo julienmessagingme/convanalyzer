@@ -2,11 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, MessageSquare, Tags, Lightbulb, BarChart3, Search, Repeat } from "lucide-react";
+import { LayoutDashboard, MessageSquare, Tags, Lightbulb, BarChart3, Search, Repeat, Layers } from "lucide-react";
 
 interface SidebarProps {
   workspaceId: string;
   workspaceName: string;
+  userEmail?: string;
+  canLogout?: boolean;
+  canSwitchWorkspace?: boolean;
 }
 
 const navItems = [
@@ -35,6 +38,12 @@ const navItems = [
     exact: false,
   },
   {
+    label: "Thematiques",
+    href: (id: string) => `/${id}/thematiques`,
+    icon: Layers,
+    exact: false,
+  },
+  {
     label: "Analytics",
     href: (id: string) => `/${id}/analytics`,
     icon: BarChart3,
@@ -54,7 +63,13 @@ const navItems = [
   },
 ];
 
-export function Sidebar({ workspaceId, workspaceName }: SidebarProps) {
+export function Sidebar({
+  workspaceId,
+  workspaceName,
+  userEmail,
+  canLogout,
+  canSwitchWorkspace,
+}: SidebarProps) {
   const pathname = usePathname();
 
   function isActive(href: string, exact: boolean) {
@@ -93,8 +108,43 @@ export function Sidebar({ workspaceId, workspaceName }: SidebarProps) {
 
       <div className="border-t border-gray-200 px-4 py-3">
         <p className="text-sm text-gray-500 truncate mb-1">{workspaceName}</p>
+        {userEmail ? (
+          <p className="text-xs text-gray-400 truncate">{userEmail}</p>
+        ) : null}
         <p className="text-xs text-gray-400">Powered by MessagingMe</p>
+        {(canSwitchWorkspace || canLogout) ? (
+          <div className="mt-2 flex flex-col gap-1">
+            {canSwitchWorkspace ? (
+              <Link
+                href="/"
+                className="text-xs text-blue-600 hover:text-blue-700"
+              >
+                Changer de workspace
+              </Link>
+            ) : null}
+            {canLogout ? <SidebarLogout /> : null}
+          </div>
+        ) : null}
       </div>
     </aside>
+  );
+}
+
+function SidebarLogout() {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+  async function onLogout() {
+    await fetch(`${basePath}/api/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
+    window.location.href = `${basePath}/login`;
+  }
+  return (
+    <button
+      onClick={onLogout}
+      className="text-left text-xs text-gray-500 hover:text-gray-700"
+    >
+      Se déconnecter
+    </button>
   );
 }

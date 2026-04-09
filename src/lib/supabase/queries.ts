@@ -1,5 +1,5 @@
 import { createServiceClient } from "./server";
-import { startOfWeek, format } from "date-fns";
+import { fetchAllRows } from "./paginate";
 import type { Tag, ConversationTag, KbSuggestion } from "@/types/database";
 
 /**
@@ -61,67 +61,6 @@ export async function getWorkspaceMetrics(
     escalatedConversations: escalated,
     tauxTransfert,
   };
-}
-
-/**
- * Get trend data grouped by time granularity.
- */
-export async function getTrendData(
-  workspaceId: string,
-  dateFrom: string,
-  dateTo: string,
-  granularity: "day" | "week" | "month"
-) {
-  const supabase = createServiceClient();
-
-  const { data: conversations } = await supabase
-    .from("conversations")
-    .select("created_at, failure_score, type")
-    .eq("workspace_id", workspaceId)
-    .gte("created_at", dateFrom)
-    .lte("created_at", `${dateTo}T23:59:59`)
-    .order("created_at", { ascending: true });
-
-  if (!conversations || conversations.length === 0) return [];
-
-  const groups = new Map<
-    string,
-    { conversations: number; failures: number }
-  >();
-
-  for (const conv of conversations) {
-    const date = new Date(conv.created_at);
-    let key: string;
-
-    switch (granularity) {
-      case "day":
-        key = format(date, "yyyy-MM-dd");
-        break;
-      case "week":
-        key = format(startOfWeek(date, { weekStartsOn: 1 }), "yyyy-MM-dd");
-        break;
-      case "month":
-        key = format(date, "yyyy-MM");
-        break;
-    }
-
-    const group = groups.get(key) ?? { conversations: 0, failures: 0 };
-    group.conversations++;
-    if (conv.failure_score > 5) {
-      group.failures++;
-    }
-    groups.set(key, group);
-  }
-
-  return Array.from(groups.entries()).map(([date, data]) => ({
-    date,
-    conversations: data.conversations,
-    failures: data.failures,
-    tauxEchec:
-      data.conversations > 0
-        ? (data.failures / data.conversations) * 100
-        : 0,
-  }));
 }
 
 /**
@@ -211,40 +150,61 @@ export async function getKbSuggestions(
  * Returns the most recent conversations that have been sentiment-scored.
  */
 export async function getConversationsForScatter(
-  workspaceId: string,
-  limit = 200
+  workspaceId: string
 ) {
   const supabase = createServiceClient();
 
-  const { data: conversations } = await supabase
-    .from("conversations")
-    .select(
-      "id, sentiment_score, urgency_score, message_count, failure_score, type, started_at, created_at"
-    )
-    .eq("workspace_id", workspaceId)
-    .not("sentiment_score", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  const conversations = await fetchAllRows<{
+    id: string;
+    sentiment_score: number;
+    urgency_score: number | null;
+    message_count: number;
+    failure_score: number;
+    type: string;
+    started_at: string | null;
+    created_at: string;
+  }>(
+    supabase
+      .from("conversations")
+      .select(
+        "id, sentiment_score, urgency_score, message_count, failure_score, type, started_at, created_at"
+      )
+      .eq("workspace_id", workspaceId)
+      .not("sentiment_score", "is", null)
+      .order("created_at", { ascending: false })
+  );
 
-  if (!conversations || conversations.length === 0) return [];
+  if (conversations.length === 0) return [];
 
-  // Fetch tags for these conversations
-  const convIds = conversations.map((c) => c.id);
-  const { data: convTags } = await supabase
-    .from("conversation_tags")
-    .select("conversation_id, tag_id, tags(id, label)")
-    .in("conversation_id", convIds);
+  // Fetch ALL conversation_tags for the workspace via inner join.
+  // We cannot use .in("conversation_id", convIds) here because convIds can be
+  // thousands of UUIDs, blowing past the PostgREST URL length limit.
+  const convTags = await fetchAllRows<Record<string, unknown>>(
+    supabase
+      .from("conversation_tags")
+      .select(
+        "conversation_id, tag_id, tags(id, label), conversations!inner(workspace_id)"
+      )
+      .eq("conversations.workspace_id", workspaceId) as unknown as {
+      range: (
+        from: number,
+        to: number
+      ) => PromiseLike<{
+        data: Record<string, unknown>[] | null;
+        error: { message: string } | null;
+      }>;
+    }
+  );
 
   // Build tag map per conversation
   const tagMap = new Map<string, { id: string; label: string }[]>();
-  if (convTags) {
-    for (const ct of convTags) {
-      const tag = ct.tags as unknown as { id: string; label: string } | null;
-      if (!tag) continue;
-      const existing = tagMap.get(ct.conversation_id) || [];
-      existing.push({ id: tag.id, label: tag.label });
-      tagMap.set(ct.conversation_id, existing);
-    }
+  for (const ct of convTags) {
+    const tag = ct.tags as { id: string; label: string } | null;
+    const convId = ct.conversation_id as string;
+    if (!tag || !convId) continue;
+    const existing = tagMap.get(convId) || [];
+    existing.push({ id: tag.id, label: tag.label });
+    tagMap.set(convId, existing);
   }
 
   return conversations.map((c) => ({
@@ -253,63 +213,3 @@ export async function getConversationsForScatter(
   }));
 }
 
-/**
- * Get average sentiment/urgency per tag for the tag matrix.
- */
-export async function getTagMatrixData(workspaceId: string) {
-  const supabase = createServiceClient();
-
-  // Get all tags for this workspace
-  const { data: tags } = await supabase
-    .from("tags")
-    .select("id, label")
-    .eq("workspace_id", workspaceId);
-
-  if (!tags || tags.length === 0) return [];
-
-  // Get all conversation_tags with conversation scores
-  const { data: ctJoin } = await supabase
-    .from("conversation_tags")
-    .select("tag_id, conversations(sentiment_score, urgency_score)")
-    .in(
-      "tag_id",
-      tags.map((t) => t.id)
-    );
-
-  // Compute averages per tag
-  const tagStats = new Map<
-    string,
-    { sentSum: number; urgSum: number; count: number }
-  >();
-
-  if (ctJoin) {
-    for (const ct of ctJoin) {
-      const conv = ct.conversations as unknown as {
-        sentiment_score: number | null;
-        urgency_score: number | null;
-      } | null;
-      if (!conv || conv.sentiment_score === null) continue;
-
-      const prev = tagStats.get(ct.tag_id) || {
-        sentSum: 0,
-        urgSum: 0,
-        count: 0,
-      };
-      prev.sentSum += conv.sentiment_score ?? 0;
-      prev.urgSum += conv.urgency_score ?? 0;
-      prev.count++;
-      tagStats.set(ct.tag_id, prev);
-    }
-  }
-
-  return tags.map((tag) => {
-    const stats = tagStats.get(tag.id);
-    return {
-      id: tag.id,
-      label: tag.label,
-      avgSentiment: stats && stats.count > 0 ? stats.sentSum / stats.count : 0,
-      avgUrgency: stats && stats.count > 0 ? stats.urgSum / stats.count : 0,
-      conversationCount: stats?.count ?? 0,
-    };
-  });
-}

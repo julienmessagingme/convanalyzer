@@ -8,18 +8,17 @@ import {
 } from "lucide-react";
 import {
   getWorkspaceMetrics,
-  getTrendData,
   getTagsByFrequency,
   getConversationsForScatter,
-  getTagMatrixData,
 } from "@/lib/supabase/queries";
+import { searchConversations } from "@/lib/supabase/search";
 import { PeriodSelector } from "@/components/layout/period-selector";
 import { ExportPdfButton } from "@/components/export/export-pdf-button";
 import { KpiCard } from "@/components/dashboard/kpi-card";
-import { TrendChart } from "@/components/dashboard/trend-chart";
 import { TagCloud } from "@/components/dashboard/tag-cloud";
-import { SentimentScatter } from "@/components/dashboard/sentiment-scatter";
-import { TagMatrix } from "@/components/dashboard/tag-matrix";
+import { DensityHeatmap } from "@/components/dashboard/density-heatmap";
+import { TagHeatmap } from "@/components/dashboard/tag-heatmap";
+import { MatrixFilters } from "@/components/dashboard/matrix-filters";
 import { EmptyState } from "@/components/ui/empty-state";
 
 interface DashboardPageProps {
@@ -28,7 +27,9 @@ interface DashboardPageProps {
     period?: string;
     date_from?: string;
     date_to?: string;
-    granularity?: string;
+    matrix_type?: string;
+    matrix_q?: string;
+    matrix_mode?: string;
   }>;
 }
 
@@ -41,8 +42,18 @@ export default async function DashboardPage({
     period = "30d",
     date_from,
     date_to,
-    granularity = "day",
+    matrix_type,
+    matrix_q,
+    matrix_mode,
   } = await searchParams;
+
+  const matrixType: "bot" | "agent" | null =
+    matrix_type === "bot" || matrix_type === "agent" ? matrix_type : null;
+  const matrixQuery = typeof matrix_q === "string" ? matrix_q.trim() : "";
+  const matrixSearchMode: "combined" | "text" | "semantic" =
+    matrix_mode === "text" || matrix_mode === "semantic"
+      ? matrix_mode
+      : "combined";
 
   const now = new Date();
   let dateFrom: string;
@@ -65,19 +76,44 @@ export default async function DashboardPage({
       break;
   }
 
-  const validGranularity = (["day", "week", "month"] as const).includes(
-    granularity as "day" | "week" | "month"
-  )
-    ? (granularity as "day" | "week" | "month")
-    : "day";
-
-  const [metrics, trendData, tags, scatterConversations, tagMatrixData] = await Promise.all([
+  const [metrics, tags, scatterConversations] = await Promise.all([
     getWorkspaceMetrics(workspaceId, dateFrom, dateTo),
-    getTrendData(workspaceId, dateFrom, dateTo, validGranularity),
     getTagsByFrequency(workspaceId),
     getConversationsForScatter(workspaceId),
-    getTagMatrixData(workspaceId),
   ]);
+
+  // Filter conversations for the "Matrice Conversations" panel.
+  // - type filter: bot / agent / all
+  // - keyword filter: hybrid (text + semantic) search
+  // Both filters are combinable. `scatterConversations` stays untouched
+  // so TagHeatmap can still aggregate across every scored conversation.
+  let matrixKeywordIds: Set<string> | null = null;
+  if (matrixQuery) {
+    try {
+      const searchResult = await searchConversations(
+        workspaceId,
+        matrixQuery,
+        matrixSearchMode
+      );
+      const ids = new Set<string>();
+      for (const m of searchResult.groups.bot.conversations) {
+        ids.add(m.conversation.id);
+      }
+      for (const m of searchResult.groups.agent.conversations) {
+        ids.add(m.conversation.id);
+      }
+      matrixKeywordIds = ids;
+    } catch (err) {
+      console.error("[dashboard] matrix keyword search failed:", err);
+      matrixKeywordIds = new Set();
+    }
+  }
+
+  const matrixConversations = scatterConversations.filter((c) => {
+    if (matrixType && c.type !== matrixType) return false;
+    if (matrixKeywordIds && !matrixKeywordIds.has(c.id)) return false;
+    return true;
+  });
 
   const periodLabels: Record<string, string> = {
     "7d": "sur 7 jours",
@@ -112,14 +148,12 @@ export default async function DashboardPage({
             period: subtitle,
             metrics,
             tags: tags.map((t) => ({ label: t.label, conversation_count: t.conversation_count })),
-            trendData,
           }}
         />
       </div>
 
       <PeriodSelector
         currentPeriod={period}
-        currentGranularity={validGranularity}
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -149,28 +183,20 @@ export default async function DashboardPage({
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Tendances
-          </h2>
-          <TrendChart data={trendData} />
-        </div>
-        <div className="lg:col-span-1 bg-white rounded-lg border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Tags</h2>
-          <TagCloud tags={tags} workspaceId={workspaceId} />
-        </div>
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Tags</h2>
+        <TagCloud tags={tags} workspaceId={workspaceId} />
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-2">
           Matrice Conversations
         </h2>
-        <p className="text-xs text-gray-400 mb-4">1 point = 1 conversation. Cliquez pour voir le detail. Filtrez par tag.</p>
-        <SentimentScatter
-          conversations={scatterConversations}
+        <p className="text-xs text-gray-400 mb-4">Densite de conversations. Plus la zone est rouge, plus il y a de conversations. Cliquez une zone pour filtrer la liste.</p>
+        <MatrixFilters />
+        <DensityHeatmap
+          conversations={matrixConversations}
           workspaceId={workspaceId}
-          tags={tags.map((t) => ({ id: t.id, label: t.label }))}
         />
       </div>
 
@@ -178,8 +204,12 @@ export default async function DashboardPage({
         <h2 className="text-lg font-semibold text-gray-900 mb-2">
           Matrice par Theme
         </h2>
-        <p className="text-xs text-gray-400 mb-4">1 bulle = 1 tag. Position = moyenne des conversations du tag. Taille = nombre de conversations.</p>
-        <TagMatrix tags={tagMatrixData} />
+        <p className="text-xs text-gray-400 mb-4">Selectionnez un theme pour voir la densite de ses conversations sur la grille sentiment / urgence. Cliquez une zone pour filtrer la liste.</p>
+        <TagHeatmap
+          conversations={scatterConversations}
+          workspaceId={workspaceId}
+          tags={tags.map((t) => ({ id: t.id, label: t.label }))}
+        />
       </div>
     </div>
   );

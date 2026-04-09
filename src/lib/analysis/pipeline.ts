@@ -4,6 +4,7 @@ import { scorePendingConversations } from "./rule-scorer";
 import { llmScorePendingConversations } from "./llm-scorer";
 import { suggestTags } from "./tag-suggester";
 import { classifyConversationTags } from "./tag-classifier";
+import { generateKbSuggestions } from "./kb-suggester";
 
 export interface PipelineResult {
   embedded: number;
@@ -11,6 +12,7 @@ export interface PipelineResult {
   llmScored: number;
   tagsSuggested: number;
   tagsClassified: number;
+  kbSuggested: number;
   errors: string[];
   duration: number;
 }
@@ -35,6 +37,7 @@ export async function runAnalysisPipeline(): Promise<PipelineResult> {
   let llmScored = 0;
   let tagsSuggested = 0;
   let tagsClassified = 0;
+  let kbSuggested = 0;
 
   // Step 1: Embed pending client messages
   try {
@@ -61,7 +64,7 @@ export async function runAnalysisPipeline(): Promise<PipelineResult> {
   // Step 3: LLM-score rule-scored conversations
   try {
     console.log("[pipeline] Step 3: LLM-scoring scored conversations...");
-    llmScored = await llmScorePendingConversations(100);
+    llmScored = await llmScorePendingConversations(500);
     console.log(`[pipeline] Step 3: LLM-scored ${llmScored} conversations`);
   } catch (err) {
     const msg = `LLM scoring failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -127,9 +130,38 @@ export async function runAnalysisPipeline(): Promise<PipelineResult> {
     errors.push(msg);
   }
 
+  // Step 6: Generate KB suggestions from failed conversations
+  try {
+    console.log("[pipeline] Step 6: Generating KB suggestions...");
+    const supabase6 = createServiceClient();
+    const { data: workspaces6, error: wsError6 } = await supabase6
+      .from("workspaces")
+      .select("id")
+      .eq("is_active", true);
+
+    if (wsError6) {
+      throw new Error(`Failed to query workspaces: ${wsError6.message}`);
+    }
+
+    if (workspaces6 && workspaces6.length > 0) {
+      for (const ws of workspaces6) {
+        const suggested = await generateKbSuggestions(ws.id as string);
+        kbSuggested += suggested;
+      }
+    }
+
+    console.log(
+      `[pipeline] Step 6: Generated ${kbSuggested} KB suggestions across ${workspaces6?.length ?? 0} workspaces`
+    );
+  } catch (err) {
+    const msg = `KB suggestion failed: ${err instanceof Error ? err.message : String(err)}`;
+    console.error(`[pipeline] Step 6 error: ${msg}`);
+    errors.push(msg);
+  }
+
   const duration = Date.now() - startTime;
   console.log(
-    `[pipeline] Complete in ${duration}ms: ${embedded} embedded, ${ruleScored} rule-scored, ${llmScored} LLM-scored, ${tagsSuggested} tags suggested, ${tagsClassified} tag assignments`
+    `[pipeline] Complete in ${duration}ms: ${embedded} embedded, ${ruleScored} rule-scored, ${llmScored} LLM-scored, ${tagsSuggested} tags suggested, ${tagsClassified} tag assignments, ${kbSuggested} KB suggestions`
   );
 
   return {
@@ -138,6 +170,7 @@ export async function runAnalysisPipeline(): Promise<PipelineResult> {
     llmScored,
     tagsSuggested,
     tagsClassified,
+    kbSuggested,
     errors,
     duration,
   };
