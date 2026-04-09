@@ -2,18 +2,93 @@
 
 ## Deployment Rules
 
-- **LOCAL ONLY** : Ne jamais deployer sur le VPS sauf si l'utilisateur le demande explicitement.
-- Dev server local : `npm run dev` sur http://localhost:3000/analyze
+- **Prod = Vercel** : https://convanalyzer.messagingme.app/analyze
+  - Auto-deploy sur push `main` (projet `convanalyzer`, team `julien-dumas-projects`)
+  - GitHub : https://github.com/julienmessagingme/convanalyzer
+  - Ne jamais re-deployer en Docker sur le VPS — le container `mieuxassure-analyze-analyze-1` est stoppe (pas supprime, garde pour rollback)
+- **Dev** : `npm run dev` sur http://localhost:3000/analyze
 - Le basePath est `/analyze` (configure dans next.config.mjs)
 - Apres modification de .env.local, il faut restart le dev server (les env vars sont lues au demarrage)
+- Env vars Vercel : `vercel env pull .env.vercel` pour recup local, `vercel env add <name> production` pour ajouter
 
-## VPS Info (pour reference, NE PAS DEPLOYER sans demande explicite)
+## VPS Info (Nginx Proxy Manager uniquement)
 
 - IP : 146.59.233.252
-- Container : mieuxassure-analyze sur port 3003
-- URL prod : https://mieuxassure.messagingme.app/analyze
-- Nginx Proxy Manager : config dans /data/nginx/proxy_host/5.conf
-- docker-compose.yml : port 3003:3000 (PAS 3000, deja pris par keolis)
+- Le VPS heberge UNIQUEMENT NPM (reverse proxy) pour l'app analyze — Next.js tourne sur Vercel
+- Config NPM : `/root/mcp-robot/data/nginx/proxy_host/5.conf` (backup dans `5.conf.backup`)
+- Le container `mieuxassure-analyze-analyze-1` (port 3003) est Exited et conserve pour rollback — NE PAS redemarrer sans raison
+- Le container `mieuxassure` (port 3001) heberge le site principal client — NE JAMAIS TOUCHER
+- Reload NPM apres modif : `sudo docker exec mcp-robot_nginx-proxy-manager_1 nginx -t && sudo docker exec mcp-robot_nginx-proxy-manager_1 nginx -s reload`
+
+## Multi-tenant auth
+
+L'app est deployee une seule fois sur Vercel mais accessible depuis 2 types de hostnames :
+
+### Admin hostname — convanalyzer.messagingme.app
+- Login classique email+password a `/login`
+- Seed admin : `julien@messagingme.fr` / `Jaus650dl+` (bcrypt dans migration 008_auth.sql)
+- Voit tous les workspaces, role `admin`
+- Cookie `ca_session` JWT HS256 (TTL 7 jours)
+
+### Client hostname — <client>.messagingme.app/analyze
+- Pas de login : SSO via reverse proxy nginx `auth_request` sur le VPS
+- Flow :
+  1. User deja authentifie sur <client>.messagingme.app (cookie `connect.sid`)
+  2. GET /analyze → nginx appelle `/_analyze_auth` (internal) → `http://<client-container>:3000/api/auth/me` avec le cookie
+  3. Si 200 : nginx injecte `X-Proxy-Secret`, `X-User-Id`, `X-User-Email`, `X-User-Role`, `X-Client-Hostname` et forward a Vercel
+  4. Middleware Vercel valide `X-Proxy-Secret` contre `PROXY_AUTH_SECRET`, lit `X-Client-Hostname` comme hostname d'origine
+  5. Server component cree un shadow user `(external_hostname, external_id)` s'il n'existe pas (`findOrCreateSsoUser`)
+  6. Shadow user a `role=client`, ne voit QUE le workspace mappe au hostname
+- Cookie SSO JWT TTL 1h (re-mint a chaque visite)
+- **Important** : `X-Client-Hostname` est un header custom qu'aucune plateforme ne strip (Cloudflare/NPM/Vercel re-ecrivent `X-Forwarded-Host`). Sans lui, Vercel croirait que le hostname est `convanalyzer.messagingme.app`.
+
+### Env vars Vercel critiques
+- `PROXY_AUTH_SECRET` — shared secret nginx ↔ Vercel
+- `AUTH_SECRET` — JWT HS256 signing key (64 chars)
+- `ADMIN_HOSTNAME` — `convanalyzer.messagingme.app`
+- `INTERNAL_API_KEY` — webhook ingest (transparent aux clients UChat)
+- `OPENAI_API_KEY`, `NEXT_PUBLIC_SUPABASE_*`, `SUPABASE_SERVICE_ROLE_KEY`
+
+### Bugs critiques a se rappeler
+- **PostgREST ne supporte pas ON CONFLICT sur un index partial** (code `42P10`). `findOrCreateSsoUser` utilise SELECT-then-INSERT avec retry sur `23505`, pas `.upsert()`. Cf commit `cadbf04`.
+- **Vercel Edge ne propage pas de facon fiable `NextResponse.next({request:{headers}})`** vers les server components. `getSessionFromMiddlewareHeader` a 3 fallbacks : header middleware → cookie → proxy headers directs. Cf commits `66e3bc9`, `65a6bd9`.
+- **Vercel re-ecrit `X-Forwarded-Host`** vers le hostname utilise pour router sur Vercel. Utiliser `X-Client-Hostname` custom. Cf commit `803341a`.
+
+## Onboarder un nouveau client (ex : `acme.messagingme.app`)
+
+1. **DB — creer le workspace + mapping hostname**
+   ```sql
+   INSERT INTO workspaces (id, name, hostname, is_active)
+   VALUES ('<workspace_id>', 'Acme', 'acme.messagingme.app', true);
+   ```
+   Ou si le workspace existe deja :
+   ```sql
+   UPDATE workspaces SET hostname = 'acme.messagingme.app' WHERE id = '<workspace_id>';
+   ```
+
+2. **Cote client (site acme)** — deployer un endpoint `GET /api/auth/me` qui :
+   - Lit le cookie de session (ex `connect.sid`)
+   - Si valide, retourne 200 avec headers `X-User-Id`, `X-User-Email`, `X-User-Role`
+   - Sinon 401
+
+3. **VPS NPM** — ajouter un proxy host pour `acme.messagingme.app` :
+   - Copier la structure de `/root/mcp-robot/data/nginx/proxy_host/5.conf` (le bloc `mieuxassure.messagingme.app`)
+   - Remplacer le `server_name`, le `proxy_pass` du bloc `/_analyze_auth` par `http://acme:3000/api/auth/me`, et le `X-Client-Hostname` par `acme.messagingme.app`
+   - Les 3 autres blocs (`/analyze`, `/analyze/api/ingest`, `/analyze/api/cron/analyze`) pointent tous vers Vercel sans changement
+   - `nginx -t && nginx -s reload`
+
+4. **DNS** — CNAME `acme.messagingme.app` → IP VPS (ou vers le proxy existant)
+
+5. **Test E2E depuis le VPS** :
+   ```bash
+   # login cote acme
+   curl -c /tmp/acme.txt -X POST https://acme.messagingme.app/api/auth/login -H 'Content-Type: application/json' -d '{"email":"...","password":"..."}'
+   # SSO
+   curl -L -b /tmp/acme.txt -w 'HTTP=%{http_code} URL=%{url_effective}\n' https://acme.messagingme.app/analyze
+   # expect 200, URL finale /analyze/<workspace_id>
+   ```
+
+6. **Sanity check en DB** : `SELECT * FROM users WHERE external_hostname='acme.messagingme.app';` devrait contenir le shadow user apres le 1er visit.
 
 ## Stack
 
