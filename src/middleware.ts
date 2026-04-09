@@ -50,8 +50,13 @@ function ciHeader(req: NextRequest, name: string): string | null {
 }
 
 function getHost(req: NextRequest): string {
-  // In proxied flows, X-Forwarded-Host wins. Strip port.
+  // In proxied flows, the reverse proxy sets a custom X-Client-Hostname header
+  // because cross-platform chains (Cloudflare → NPM → Vercel) rewrite
+  // X-Forwarded-Host to the Host used to route on the innermost platform,
+  // which would hide the real client hostname. X-Client-Hostname is a custom
+  // header that no platform touches, so it survives the full chain.
   const raw = (
+    req.headers.get("x-client-hostname") ??
     req.headers.get("x-forwarded-host") ??
     req.headers.get("host") ??
     ""
