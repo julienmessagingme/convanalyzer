@@ -198,15 +198,26 @@ export async function canAccessWorkspace(
 }
 
 /**
- * Helper to read the session that middleware passed via a synthetic header.
- * Middleware can't set the request cookies for the same request, so for SSO
- * flows we read the session cookie set by middleware on the response and it
- * will be available on the NEXT request. For the current request, middleware
- * stamps `x-ca-session` with the JWT so server components can decode it.
+ * Helper to read the session from the incoming request.
+ *
+ * Tries two sources in order:
+ *  1. The `x-ca-session` synthetic header injected by middleware for the
+ *     current request (used by SSO on the very first proxied request where
+ *     the browser hasn't received the cookie yet).
+ *  2. The `ca_session` cookie directly — always present for admin/local
+ *     sessions and for returning SSO visits.
+ *
+ * The two-source strategy exists because Next.js middleware cannot set the
+ * request cookies for the current request, only the response cookies.
  */
 export async function getSessionFromMiddlewareHeader(): Promise<Session | null> {
   const h = await headers();
   const token = h.get("x-ca-session");
-  if (!token) return null;
-  return verifySession(token);
+  if (token) {
+    const session = await verifySession(token);
+    if (session) return session;
+  }
+  // Fallback: read the cookie directly. Covers the admin flow and returning
+  // SSO visits where the browser already holds a valid ca_session cookie.
+  return getSession();
 }
