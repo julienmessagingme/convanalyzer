@@ -10,6 +10,13 @@ interface SidebarProps {
   userEmail?: string;
   canLogout?: boolean;
   canSwitchWorkspace?: boolean;
+  /**
+   * When true, only the "Dashboard" item is clickable. All other items
+   * are rendered as disabled with opacity and a tooltip. Set from the
+   * server layout based on isRestrictedSession (SSO client sessions
+   * from restricted hostnames). Admin sessions always get false.
+   */
+  restrictedMode?: boolean;
 }
 
 const navItems = [
@@ -18,48 +25,56 @@ const navItems = [
     href: (id: string) => `/${id}`,
     icon: LayoutDashboard,
     exact: true,
+    alwaysAvailable: true,
   },
   {
     label: "Conversations",
     href: (id: string) => `/${id}/conversations`,
     icon: MessageSquare,
     exact: false,
+    alwaysAvailable: false,
   },
   {
     label: "Recherche",
     href: (id: string) => `/${id}/search`,
     icon: Search,
     exact: false,
+    alwaysAvailable: false,
   },
   {
     label: "Iterations",
     href: (id: string) => `/${id}/iterations`,
     icon: Repeat,
     exact: false,
+    alwaysAvailable: false,
   },
   {
     label: "Thematiques",
     href: (id: string) => `/${id}/thematiques`,
     icon: Layers,
     exact: false,
+    alwaysAvailable: false,
   },
   {
     label: "Analytics",
     href: (id: string) => `/${id}/analytics`,
     icon: BarChart3,
     exact: false,
+    alwaysAvailable: false,
   },
   {
     label: "Tags",
     href: (id: string) => `/${id}/tags`,
     icon: Tags,
     exact: false,
+    alwaysAvailable: false,
   },
   {
     label: "Suggestions KB",
     href: (id: string) => `/${id}/suggestions`,
     icon: Lightbulb,
     exact: false,
+    alwaysAvailable: false,
   },
 ];
 
@@ -69,6 +84,7 @@ export function Sidebar({
   userEmail,
   canLogout,
   canSwitchWorkspace,
+  restrictedMode = false,
 }: SidebarProps) {
   const pathname = usePathname();
 
@@ -89,6 +105,22 @@ export function Sidebar({
         {navItems.map((item) => {
           const href = item.href(workspaceId);
           const active = isActive(href, item.exact);
+          const disabled = restrictedMode && !item.alwaysAvailable;
+
+          if (disabled) {
+            return (
+              <div
+                key={item.label}
+                className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-gray-400 opacity-50 cursor-not-allowed select-none"
+                title="Non disponible dans votre offre"
+                aria-disabled="true"
+              >
+                <item.icon className="h-4 w-4" />
+                {item.label}
+              </div>
+            );
+          }
+
           return (
             <Link
               key={item.label}

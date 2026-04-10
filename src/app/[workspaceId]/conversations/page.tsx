@@ -5,6 +5,11 @@ import { ConversationList } from "@/components/conversations/conversation-list";
 import { ConversationTabs } from "@/components/conversations/conversation-tabs";
 import { Pagination } from "@/components/conversations/pagination";
 import { ExportCsvButton } from "@/components/export/export-csv-button";
+import { ForbiddenPage } from "@/components/ui/forbidden-page";
+import {
+  getSessionFromMiddlewareHeader,
+  isRestrictedSession,
+} from "@/lib/auth/session";
 import { searchConversations } from "@/lib/supabase/search";
 import type { Conversation, Tag } from "@/types/database";
 import type { CsvConversationRow } from "@/lib/export/csv";
@@ -22,6 +27,9 @@ export default async function ConversationsPage({
   params,
   searchParams,
 }: ConversationsPageProps) {
+  const session = await getSessionFromMiddlewareHeader();
+  if (isRestrictedSession(session)) return <ForbiddenPage />;
+
   const { workspaceId } = await params;
   const filters = await searchParams;
 

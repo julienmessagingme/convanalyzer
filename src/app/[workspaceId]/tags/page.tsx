@@ -1,5 +1,10 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { TagManager } from "@/components/tags/tag-manager";
+import { ForbiddenPage } from "@/components/ui/forbidden-page";
+import {
+  getSessionFromMiddlewareHeader,
+  isRestrictedSession,
+} from "@/lib/auth/session";
 import type { Tag, SuggestedTag } from "@/types/database";
 
 interface TagsPageProps {
@@ -7,6 +12,9 @@ interface TagsPageProps {
 }
 
 export default async function TagsPage({ params }: TagsPageProps) {
+  const session = await getSessionFromMiddlewareHeader();
+  if (isRestrictedSession(session)) return <ForbiddenPage />;
+
   const { workspaceId } = await params;
   const supabase = createServiceClient();
 

@@ -4,6 +4,11 @@ import { fetchAllRows } from "@/lib/supabase/paginate";
 import { ConversationTabs } from "@/components/conversations/conversation-tabs";
 import { IterationsTable } from "@/components/iterations/iterations-table";
 import { PeriodSelector } from "@/components/layout/period-selector";
+import { ForbiddenPage } from "@/components/ui/forbidden-page";
+import {
+  getSessionFromMiddlewareHeader,
+  isRestrictedSession,
+} from "@/lib/auth/session";
 import type { ConversationType } from "@/types/database";
 
 interface IterationsPageProps {
@@ -59,6 +64,9 @@ export default async function IterationsPage({
   params,
   searchParams,
 }: IterationsPageProps) {
+  const session = await getSessionFromMiddlewareHeader();
+  if (isRestrictedSession(session)) return <ForbiddenPage />;
+
   const { workspaceId } = await params;
   const filters = await searchParams;
 

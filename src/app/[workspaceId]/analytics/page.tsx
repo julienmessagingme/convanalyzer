@@ -1,5 +1,10 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { AnalyticsDashboard } from "@/components/analytics/analytics-dashboard";
+import { ForbiddenPage } from "@/components/ui/forbidden-page";
+import {
+  getSessionFromMiddlewareHeader,
+  isRestrictedSession,
+} from "@/lib/auth/session";
 import type { Tag } from "@/types/database";
 
 interface AnalyticsPageProps {
@@ -7,6 +12,9 @@ interface AnalyticsPageProps {
 }
 
 export default async function AnalyticsPage({ params }: AnalyticsPageProps) {
+  const session = await getSessionFromMiddlewareHeader();
+  if (isRestrictedSession(session)) return <ForbiddenPage />;
+
   const { workspaceId } = await params;
   const supabase = createServiceClient();
 

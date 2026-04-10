@@ -5,6 +5,11 @@ import { SearchGroupStats } from "@/components/search/search-group-stats";
 import { ConversationTabs } from "@/components/conversations/conversation-tabs";
 import { ConversationCard } from "@/components/conversations/conversation-card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ForbiddenPage } from "@/components/ui/forbidden-page";
+import {
+  getSessionFromMiddlewareHeader,
+  isRestrictedSession,
+} from "@/lib/auth/session";
 import { Search } from "lucide-react";
 import type { Tag } from "@/types/database";
 
@@ -17,6 +22,9 @@ export default async function SearchPage({
   params,
   searchParams,
 }: SearchPageProps) {
+  const session = await getSessionFromMiddlewareHeader();
+  if (isRestrictedSession(session)) return <ForbiddenPage />;
+
   const { workspaceId } = await params;
   const filters = await searchParams;
 

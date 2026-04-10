@@ -1,6 +1,11 @@
 import { getKbSuggestions } from "@/lib/supabase/queries";
 import { SuggestionsTable } from "@/components/suggestions/suggestions-table";
 import { GenerateButton } from "@/components/suggestions/generate-button";
+import { ForbiddenPage } from "@/components/ui/forbidden-page";
+import {
+  getSessionFromMiddlewareHeader,
+  isRestrictedSession,
+} from "@/lib/auth/session";
 
 interface SuggestionsPageProps {
   params: Promise<{ workspaceId: string }>;
@@ -9,6 +14,9 @@ interface SuggestionsPageProps {
 export default async function SuggestionsPage({
   params,
 }: SuggestionsPageProps) {
+  const session = await getSessionFromMiddlewareHeader();
+  if (isRestrictedSession(session)) return <ForbiddenPage />;
+
   const { workspaceId } = await params;
   const suggestions = await getKbSuggestions(workspaceId);
 

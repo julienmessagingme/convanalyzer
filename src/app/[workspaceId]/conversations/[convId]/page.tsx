@@ -9,6 +9,11 @@ import { MessageBubble } from "@/components/conversations/message-bubble";
 import { ExportPdfButton } from "@/components/export/export-pdf-button";
 import { TagAssignment } from "@/components/conversations/tag-assignment";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ForbiddenPage } from "@/components/ui/forbidden-page";
+import {
+  getSessionFromMiddlewareHeader,
+  isRestrictedSession,
+} from "@/lib/auth/session";
 import type { Conversation, Message, Tag } from "@/types/database";
 
 interface ConversationDetailPageProps {
@@ -18,6 +23,9 @@ interface ConversationDetailPageProps {
 export default async function ConversationDetailPage({
   params,
 }: ConversationDetailPageProps) {
+  const session = await getSessionFromMiddlewareHeader();
+  if (isRestrictedSession(session)) return <ForbiddenPage />;
+
   const { workspaceId, convId } = await params;
 
   const result = await getConversationWithMessages(workspaceId, convId);

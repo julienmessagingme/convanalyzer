@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import {
   getSessionFromMiddlewareHeader,
   canAccessWorkspace,
+  isRestrictedSession,
 } from "@/lib/auth/session";
 
 interface WorkspaceLayoutProps {
@@ -41,6 +42,7 @@ export default async function WorkspaceLayout({
   // out and also navigate between workspaces.
   const isLocal = session.authType === "local";
   const isAdmin = session.role === "admin";
+  const restricted = isRestrictedSession(session);
 
   return (
     <div className="flex min-h-screen">
@@ -50,6 +52,7 @@ export default async function WorkspaceLayout({
         userEmail={session.email}
         canLogout={isLocal}
         canSwitchWorkspace={isAdmin}
+        restrictedMode={restricted}
       />
       <main className="ml-60 flex-1 bg-gray-50 p-6 min-h-screen">
         {children}

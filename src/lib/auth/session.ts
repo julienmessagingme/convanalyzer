@@ -20,6 +20,30 @@ import type { Session, LocalUserRow, UserRole, AuthType } from "./types";
  */
 
 /**
+ * Hostnames whose SSO client sessions get a restricted UI:
+ * only the Dashboard tab and the 7-day period button are accessible.
+ *
+ * This is ONLY enforced for role === "client" sessions. Admin sessions
+ * (role === "admin") are ALWAYS unrestricted, even when browsing via
+ * the client subdomain — admins get full access regardless of how they
+ * reach the dashboard.
+ */
+const RESTRICTED_SSO_HOSTNAMES = new Set<string>([
+  "mieuxassure.messagingme.app",
+]);
+
+/**
+ * Returns true if this session should see the restricted UI
+ * (Dashboard only, 7 days only). Admin sessions are NEVER restricted.
+ */
+export function isRestrictedSession(session: Session | null): boolean {
+  if (!session) return false;
+  if (session.role === "admin") return false;
+  if (!session.externalHostname) return false;
+  return RESTRICTED_SSO_HOSTNAMES.has(session.externalHostname);
+}
+
+/**
  * Reads and verifies the session cookie from the incoming request.
  * Returns null if no cookie or invalid/expired token.
  */

@@ -1,6 +1,11 @@
 import { getConversationsForScatter } from "@/lib/supabase/queries";
 import { ThematiquesTabs } from "@/components/thematiques/thematiques-tabs";
 import { LevelCard } from "@/components/thematiques/level-card";
+import { ForbiddenPage } from "@/components/ui/forbidden-page";
+import {
+  getSessionFromMiddlewareHeader,
+  isRestrictedSession,
+} from "@/lib/auth/session";
 
 interface ThematiquesPageProps {
   params: Promise<{ workspaceId: string }>;
@@ -78,6 +83,9 @@ export default async function ThematiquesPage({
   params,
   searchParams,
 }: ThematiquesPageProps) {
+  const session = await getSessionFromMiddlewareHeader();
+  if (isRestrictedSession(session)) return <ForbiddenPage />;
+
   const { workspaceId } = await params;
   const filters = await searchParams;
 

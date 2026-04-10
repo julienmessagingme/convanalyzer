@@ -20,6 +20,10 @@ import { DensityHeatmap } from "@/components/dashboard/density-heatmap";
 import { TagHeatmap } from "@/components/dashboard/tag-heatmap";
 import { MatrixFilters } from "@/components/dashboard/matrix-filters";
 import { EmptyState } from "@/components/ui/empty-state";
+import {
+  getSessionFromMiddlewareHeader,
+  isRestrictedSession,
+} from "@/lib/auth/session";
 
 interface DashboardPageProps {
   params: Promise<{ workspaceId: string }>;
@@ -39,13 +43,19 @@ export default async function DashboardPage({
 }: DashboardPageProps) {
   const { workspaceId } = await params;
   const {
-    period = "30d",
+    period: rawPeriod = "30d",
     date_from,
     date_to,
     matrix_type,
     matrix_q,
     matrix_mode,
   } = await searchParams;
+
+  // Restricted SSO clients are always forced to the 7-day view server-side.
+  // URL bookmarks like ?period=90d are ignored for them. Admins pass through.
+  const session = await getSessionFromMiddlewareHeader();
+  const restricted = isRestrictedSession(session);
+  const period = restricted ? "7d" : rawPeriod;
 
   const matrixType: "bot" | "agent" | null =
     matrix_type === "bot" || matrix_type === "agent" ? matrix_type : null;
@@ -154,6 +164,7 @@ export default async function DashboardPage({
 
       <PeriodSelector
         currentPeriod={period}
+        restrictedMode={restricted}
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
