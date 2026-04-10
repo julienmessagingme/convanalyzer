@@ -45,6 +45,7 @@ const PLOT_W = SVG_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
 const PLOT_H = SVG_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
 const CELL_W = PLOT_W / URG_STEPS;
 const CELL_H = PLOT_H / SENT_STEPS;
+const CELL_GAP = 6;
 
 interface CellData {
   u: number; // urgency value
@@ -158,48 +159,23 @@ export function DensityHeatmap({
           className="w-full h-auto"
           style={{ maxHeight: 550 }}
         >
-          <defs>
-            <filter
-              id="heat-blur"
-              x="-20%"
-              y="-20%"
-              width="140%"
-              height="140%"
-            >
-              <feGaussianBlur stdDeviation="24" />
-            </filter>
-            <clipPath id="heat-clip">
-              <rect
-                x={MARGIN_LEFT}
-                y={MARGIN_TOP}
-                width={PLOT_W}
-                height={PLOT_H}
-              />
-            </clipPath>
-          </defs>
-
-          {/* Blurred heatmap layer */}
-          <g filter="url(#heat-blur)" clipPath="url(#heat-clip)">
-            {/* White background to ensure blur has base */}
-            <rect
-              x={MARGIN_LEFT}
-              y={MARGIN_TOP}
-              width={PLOT_W}
-              height={PLOT_H}
-              fill="#ffffff"
-            />
+          {/* Discrete tile heatmap layer */}
+          <g>
             {cells.map((cell) => {
               const t =
                 cell.count === 0 ? 0 : Math.log(1 + cell.count) / logMax;
-              const color = getHeatColor(t);
+              const fill =
+                cell.count === 0 ? "#f3f4f6" : getHeatColor(t);
               return (
                 <rect
-                  key={`blur-${cell.u}-${cell.s}`}
-                  x={cellX(cell.u)}
-                  y={cellY(cell.s)}
-                  width={CELL_W}
-                  height={CELL_H}
-                  fill={color}
+                  key={`tile-${cell.u}-${cell.s}`}
+                  x={cellX(cell.u) + CELL_GAP / 2}
+                  y={cellY(cell.s) + CELL_GAP / 2}
+                  width={CELL_W - CELL_GAP}
+                  height={CELL_H - CELL_GAP}
+                  rx={3}
+                  ry={3}
+                  fill={fill}
                 />
               );
             })}
