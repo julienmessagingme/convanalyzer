@@ -16,6 +16,9 @@ interface SentimentData {
   total: number;
   avgSentiment: number | null;
   distribution: Record<number, number>;
+  avgUrgency: number | null;
+  urgencyDistribution: Record<number, number>;
+  urgencyTotal: number;
 }
 
 interface IterationsTableProps {
@@ -23,6 +26,8 @@ interface IterationsTableProps {
   maxPct: number;
   workspaceId: string;
   type: string;
+  dateFrom: string;
+  dateTo: string;
 }
 
 function sentimentBarColor(score: number): { solid: string; light: string } {
@@ -34,33 +39,54 @@ function sentimentBarColor(score: number): { solid: string; light: string } {
   };
 }
 
-function SentimentPanel({ data }: { data: SentimentData }) {
-  const maxCount = Math.max(...Object.values(data.distribution), 1);
+function urgencyBarColor(score: number): { solid: string; light: string } {
+  // Map 0..5 to a hue from green (130) to red (0)
+  // 0 = informationnel (vert), 5 = critique (rouge)
+  const hue = 130 - (score / 5) * 130;
+  return {
+    solid: `hsl(${hue}, 70%, 48%)`,
+    light: `hsl(${hue}, 75%, 88%)`,
+  };
+}
+
+interface HistogramConfig {
+  title: string;
+  subtitle: string;
+  avg: number | null;
+  avgLabel: string;
+  avgFormatter: (v: number) => string;
+  colorFor: (score: number) => { solid: string; light: string };
+  scores: number[];
+  distribution: Record<number, number>;
+  scoreLabel: (score: number) => string;
+  leftLabel: string;
+  midLabel: string;
+  rightLabel: string;
+}
+
+function Histogram({ config }: { config: HistogramConfig }) {
+  const maxCount = Math.max(...Object.values(config.distribution), 1);
 
   return (
-    <div className="px-8 py-6 bg-gradient-to-b from-gray-50/80 to-white border-t border-gray-200">
+    <div>
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div>
           <h3 className="text-sm font-semibold text-gray-900">
-            Distribution du sentiment
+            {config.title}
           </h3>
-          <p className="text-xs text-gray-500 mt-1">
-            {data.total} conversation{data.total > 1 ? "s" : ""} scoree
-            {data.total > 1 ? "s" : ""}
-          </p>
+          <p className="text-xs text-gray-500 mt-1">{config.subtitle}</p>
         </div>
-        {data.avgSentiment !== null && (
+        {config.avg !== null && (
           <div className="text-right">
             <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">
-              Moyenne
+              {config.avgLabel}
             </p>
             <p
               className="text-3xl font-bold leading-none mt-1"
-              style={{ color: sentimentBarColor(data.avgSentiment).solid }}
+              style={{ color: config.colorFor(config.avg).solid }}
             >
-              {data.avgSentiment > 0 ? "+" : ""}
-              {data.avgSentiment}
+              {config.avgFormatter(config.avg)}
             </p>
           </div>
         )}
@@ -80,10 +106,10 @@ function SentimentPanel({ data }: { data: SentimentData }) {
 
         {/* Bars */}
         <div className="relative flex items-end gap-2 h-56">
-          {Array.from({ length: 11 }, (_, i) => i - 5).map((score) => {
-            const count = data.distribution[score] ?? 0;
+          {config.scores.map((score) => {
+            const count = config.distribution[score] ?? 0;
             const heightPct = maxCount > 0 ? (count / maxCount) * 100 : 0;
-            const { solid, light } = sentimentBarColor(score);
+            const { solid, light } = config.colorFor(score);
 
             return (
               <div
@@ -105,12 +131,8 @@ function SentimentPanel({ data }: { data: SentimentData }) {
                 />
 
                 {/* Score label (below bar) */}
-                <div
-                  className={`text-xs font-medium mt-2 tabular-nums ${
-                    score === 0 ? "text-gray-500" : "text-gray-600"
-                  }`}
-                >
-                  {score > 0 ? `+${score}` : score}
+                <div className="text-xs font-medium mt-2 tabular-nums text-gray-600">
+                  {config.scoreLabel(score)}
                 </div>
               </div>
             );
@@ -119,10 +141,51 @@ function SentimentPanel({ data }: { data: SentimentData }) {
 
         {/* Axis labels */}
         <div className="flex items-center justify-between mt-2 px-1 text-[10px] uppercase tracking-wider text-gray-400 font-medium">
-          <span>Frustre</span>
-          <span>Neutre</span>
-          <span>Satisfait</span>
+          <span>{config.leftLabel}</span>
+          <span>{config.midLabel}</span>
+          <span>{config.rightLabel}</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function DistributionPanel({ data }: { data: SentimentData }) {
+  const sentimentConfig: HistogramConfig = {
+    title: "Distribution du sentiment",
+    subtitle: `${data.total} conversation${data.total > 1 ? "s" : ""} scoree${data.total > 1 ? "s" : ""}`,
+    avg: data.avgSentiment,
+    avgLabel: "Moyenne",
+    avgFormatter: (v) => `${v > 0 ? "+" : ""}${v}`,
+    colorFor: sentimentBarColor,
+    scores: Array.from({ length: 11 }, (_, i) => i - 5),
+    distribution: data.distribution,
+    scoreLabel: (s) => (s > 0 ? `+${s}` : String(s)),
+    leftLabel: "Frustre",
+    midLabel: "Neutre",
+    rightLabel: "Satisfait",
+  };
+
+  const urgencyConfig: HistogramConfig = {
+    title: "Distribution de l'urgence",
+    subtitle: `${data.urgencyTotal} conversation${data.urgencyTotal > 1 ? "s" : ""} scoree${data.urgencyTotal > 1 ? "s" : ""}`,
+    avg: data.avgUrgency,
+    avgLabel: "Moyenne",
+    avgFormatter: (v) => String(v),
+    colorFor: urgencyBarColor,
+    scores: [0, 1, 2, 3, 4, 5],
+    distribution: data.urgencyDistribution,
+    scoreLabel: (s) => String(s),
+    leftLabel: "Informationnel",
+    midLabel: "Modere",
+    rightLabel: "Critique",
+  };
+
+  return (
+    <div className="px-8 py-6 bg-gradient-to-b from-gray-50/80 to-white border-t border-gray-200">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <Histogram config={sentimentConfig} />
+        <Histogram config={urgencyConfig} />
       </div>
     </div>
   );
@@ -133,10 +196,21 @@ export function IterationsTable({
   maxPct,
   workspaceId,
   type,
+  dateFrom,
+  dateTo,
 }: IterationsTableProps) {
   const [expandedBucket, setExpandedBucket] = useState<string | null>(null);
   const [sentimentData, setSentimentData] = useState<Record<string, SentimentData>>({});
   const [loading, setLoading] = useState<string | null>(null);
+
+  // Reset cache when period or tab changes so histograms reflect the new window
+  const cacheKey = `${type}|${dateFrom}|${dateTo}`;
+  const [currentCacheKey, setCurrentCacheKey] = useState(cacheKey);
+  if (currentCacheKey !== cacheKey) {
+    setCurrentCacheKey(cacheKey);
+    setSentimentData({});
+    setExpandedBucket(null);
+  }
 
   const handleRowClick = async (bucket: BucketRow) => {
     if (expandedBucket === bucket.label) {
@@ -151,8 +225,16 @@ export function IterationsTable({
       setLoading(bucket.label);
       try {
         const maxParam = bucket.max === Infinity ? "9999" : String(bucket.max);
+        const params = new URLSearchParams({
+          workspace_id: workspaceId,
+          min: String(bucket.min),
+          max: maxParam,
+          type,
+          date_from: dateFrom,
+          date_to: dateTo,
+        });
         const res = await fetch(
-          `${basePath}/api/iterations/sentiment?workspace_id=${workspaceId}&min=${bucket.min}&max=${maxParam}&type=${type}`
+          `${basePath}/api/iterations/sentiment?${params.toString()}`
         );
         if (res.ok) {
           const data = await res.json();
@@ -221,7 +303,7 @@ export function IterationsTable({
                       Chargement...
                     </div>
                   ) : sentimentData[bucket.label] ? (
-                    <SentimentPanel data={sentimentData[bucket.label]} />
+                    <DistributionPanel data={sentimentData[bucket.label]} />
                   ) : null
                 )}
               </td>

@@ -1,7 +1,9 @@
+import { subDays, formatISO } from "date-fns";
 import { createServiceClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/supabase/paginate";
 import { ConversationTabs } from "@/components/conversations/conversation-tabs";
 import { IterationsTable } from "@/components/iterations/iterations-table";
+import { PeriodSelector } from "@/components/layout/period-selector";
 import type { ConversationType } from "@/types/database";
 
 interface IterationsPageProps {
@@ -65,29 +67,69 @@ export default async function IterationsPage({
       ? "agent"
       : "bot";
 
+  // Period filter (mirrors dashboard behaviour)
+  const period =
+    typeof filters.period === "string" ? filters.period : "30d";
+  const rawDateFrom =
+    typeof filters.date_from === "string" ? filters.date_from : undefined;
+  const rawDateTo =
+    typeof filters.date_to === "string" ? filters.date_to : undefined;
+
+  const now = new Date();
+  let dateFrom: string;
+  let dateTo: string = formatISO(now, { representation: "date" });
+
+  switch (period) {
+    case "7d":
+      dateFrom = formatISO(subDays(now, 7), { representation: "date" });
+      break;
+    case "90d":
+      dateFrom = formatISO(subDays(now, 90), { representation: "date" });
+      break;
+    case "custom":
+      dateFrom =
+        rawDateFrom ??
+        formatISO(subDays(now, 30), { representation: "date" });
+      dateTo = rawDateTo ?? dateTo;
+      break;
+    case "30d":
+    default:
+      dateFrom = formatISO(subDays(now, 30), { representation: "date" });
+      break;
+  }
+
+  const dateFromIso = `${dateFrom}T00:00:00`;
+  const dateToIso = `${dateTo}T23:59:59`;
+
   const supabase = createServiceClient();
 
-  // Get counts for tabs
+  // Get counts for tabs (within period)
   const [{ count: botCount }, { count: agentCount }] = await Promise.all([
     supabase
       .from("conversations")
       .select("*", { count: "exact", head: true })
       .eq("workspace_id", workspaceId)
-      .eq("type", "bot"),
+      .eq("type", "bot")
+      .gte("started_at", dateFromIso)
+      .lte("started_at", dateToIso),
     supabase
       .from("conversations")
       .select("*", { count: "exact", head: true })
       .eq("workspace_id", workspaceId)
-      .eq("type", "agent"),
+      .eq("type", "agent")
+      .gte("started_at", dateFromIso)
+      .lte("started_at", dateToIso),
   ]);
 
-  // Fetch message_count for active tab (paginated to bypass 1000-row limit)
+  // Fetch message_count for active tab within period (paginated)
   const conversations = await fetchAllRows<{ message_count: number }>(
     supabase
       .from("conversations")
       .select("message_count")
       .eq("workspace_id", workspaceId)
       .eq("type", tab)
+      .gte("started_at", dateFromIso)
+      .lte("started_at", dateToIso)
   );
 
   // Exclude conversations with 0 messages (no iterations)
@@ -108,9 +150,12 @@ export default async function IterationsPage({
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">
-        Repartition par iterations
-      </h1>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <h1 className="text-2xl font-bold text-gray-900">
+          Repartition par iterations
+        </h1>
+        <PeriodSelector currentPeriod={period} />
+      </div>
 
       <ConversationTabs
         activeTab={tab}
@@ -140,6 +185,8 @@ export default async function IterationsPage({
         maxPct={maxPct}
         workspaceId={workspaceId}
         type={tab}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
       />
 
       <p className="text-xs text-gray-400">
