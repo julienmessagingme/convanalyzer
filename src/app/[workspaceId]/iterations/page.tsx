@@ -110,15 +110,15 @@ export default async function IterationsPage({
       .select("*", { count: "exact", head: true })
       .eq("workspace_id", workspaceId)
       .eq("type", "bot")
-      .gte("started_at", dateFromIso)
-      .lte("started_at", dateToIso),
+      .gte("created_at", dateFromIso)
+      .lte("created_at", dateToIso),
     supabase
       .from("conversations")
       .select("*", { count: "exact", head: true })
       .eq("workspace_id", workspaceId)
       .eq("type", "agent")
-      .gte("started_at", dateFromIso)
-      .lte("started_at", dateToIso),
+      .gte("created_at", dateFromIso)
+      .lte("created_at", dateToIso),
   ]);
 
   // Fetch message_count for active tab within period (paginated)
@@ -128,8 +128,8 @@ export default async function IterationsPage({
       .select("message_count")
       .eq("workspace_id", workspaceId)
       .eq("type", tab)
-      .gte("started_at", dateFromIso)
-      .lte("started_at", dateToIso)
+      .gte("created_at", dateFromIso)
+      .lte("created_at", dateToIso)
   );
 
   // Exclude conversations with 0 messages (no iterations)

@@ -30,10 +30,10 @@ export async function GET(req: NextRequest) {
     .not("sentiment_score", "is", null);
 
   if (dateFrom) {
-    query = query.gte("started_at", `${dateFrom}T00:00:00`);
+    query = query.gte("created_at", `${dateFrom}T00:00:00`);
   }
   if (dateTo) {
-    query = query.lte("started_at", `${dateTo}T23:59:59`);
+    query = query.lte("created_at", `${dateTo}T23:59:59`);
   }
 
   const conversations = await fetchAllRows<{
