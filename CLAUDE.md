@@ -1,5 +1,19 @@
 # CLAUDE.md — Mieux Assure Analyze
 
+## Supabase storage — free tier budget (0,5 GB)
+
+**État au 2026-04-11** : DB à **373 MB** après cleanup. Ingest **coupé** via `INGEST_ENABLED=false` sur Vercel (check dans `src/app/api/ingest/route.ts`, retourne 200 silencieux).
+
+**Budget** : ~1 000 conv/jour quand l'ingest est ON → la DB remonte à 500 MB en **~4-5 mois**.
+
+**Playbook si on réactive l'ingest** :
+1. Sur Vercel → env vars : passer `INGEST_ENABLED` à `true` (ou supprimer la var) + **Redeploy** (Next.js lit au build)
+2. Mettre un reminder mensuel pour contrôler la taille via `SELECT pg_size_pretty(pg_database_size('postgres'));`
+3. Quand > 450 MB, relancer le pattern de migration 010 (cutoff 10 % + raw_payload NULL + VACUUM FULL hors transaction, `ALTER ROLE postgres SET statement_timeout = '10min'` pour éviter le timeout SQL Editor)
+4. Alternative si on veut garder tout l'historique : upgrader Supabase **Pro ($25/mois, 8 GB)** et supprimer le kill-switch
+
+**Ce qui bouffe la place** : les embeddings vector(1536) (~6 KB chacun) sur `messages` dominent la taille. L'index HNSW ajoute ~50-80 MB. Option nucléaire pour re-gagner ~250 MB : nullifier les embeddings anciens + drop/recréer l'index HNSW (casse la détection `client_repetition` du rule-scorer et la future clustering).
+
 ## Deployment Rules
 
 - **Prod = Vercel** : https://convanalyzer.messagingme.app/analyze
