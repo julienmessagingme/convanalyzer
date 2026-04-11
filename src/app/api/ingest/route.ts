@@ -23,6 +23,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Emergency kill-switch: when INGEST_ENABLED=false, accept the webhook
+    // (so the sender does not retry) but skip all DB writes. Used to pause
+    // ingestion during storage cleanup / quota pressure.
+    if (process.env.INGEST_ENABLED === "false") {
+      return NextResponse.json({ ok: true, skipped: "ingest_disabled" });
+    }
+
     // 2. Parse JSON body
     let body: unknown;
     try {
