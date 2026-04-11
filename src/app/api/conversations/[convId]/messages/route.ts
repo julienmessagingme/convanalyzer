@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import {
+  getSessionFromMiddlewareHeader,
+  isRestrictedSession,
+} from "@/lib/auth/session";
 
 /**
  * GET /api/conversations/:convId/messages
@@ -9,6 +13,16 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ convId: string }> }
 ) {
+  // Auth gate: require a valid session. Restricted SSO clients cannot read
+  // conversation messages since the conversation detail page is not in their offer.
+  const session = await getSessionFromMiddlewareHeader();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (isRestrictedSession(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const { convId } = await params;
   const supabase = createServiceClient();
 

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/supabase/paginate";
+import {
+  getSessionFromMiddlewareHeader,
+  isRestrictedSession,
+} from "@/lib/auth/session";
 
 /**
  * GET /api/analytics?workspace_id=X&tag_ids=id1,id2&date_from=2026-01-01&date_to=2026-03-23&show_sentiment=1&show_urgency=1
@@ -10,6 +14,16 @@ import { fetchAllRows } from "@/lib/supabase/paginate";
  * - optionally: avg sentiment and avg urgency per day
  */
 export async function GET(req: NextRequest) {
+  // Auth gate: require a valid session. Restricted SSO clients (e.g. mieuxassure)
+  // cannot read analytics data since the /analytics page is not in their offer.
+  const session = await getSessionFromMiddlewareHeader();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (isRestrictedSession(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const sp = req.nextUrl.searchParams;
   const workspaceId = sp.get("workspace_id");
   const tagIdsRaw = sp.get("tag_ids");

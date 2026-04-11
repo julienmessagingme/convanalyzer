@@ -1,12 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/supabase/paginate";
+import {
+  getSessionFromMiddlewareHeader,
+  isRestrictedSession,
+} from "@/lib/auth/session";
 
 /**
  * GET /api/iterations/sentiment?workspace_id=X&min=4&max=6&type=bot
  * Returns sentiment distribution for conversations in a given iteration range.
  */
 export async function GET(req: NextRequest) {
+  // Auth gate: require a valid session. Restricted SSO clients cannot read
+  // iterations data since the iterations page is not in their offer.
+  const session = await getSessionFromMiddlewareHeader();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (isRestrictedSession(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const sp = req.nextUrl.searchParams;
   const workspaceId = sp.get("workspace_id");
   const min = parseInt(sp.get("min") ?? "1", 10);
