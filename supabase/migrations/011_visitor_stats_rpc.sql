@@ -3,9 +3,12 @@ CREATE INDEX IF NOT EXISTS idx_conversations_workspace_client
   ON conversations (workspace_id, client_id)
   WHERE client_id IS NOT NULL;
 
+-- Supprime l'ancienne signature uuid si elle existe
+DROP FUNCTION IF EXISTS get_visitor_stats(uuid);
+
 -- RPC get_visitor_stats : agrège les conversations par client_id pour un workspace
 -- Remplace le fetchAllRows + GROUP BY JS côté serveur
-CREATE OR REPLACE FUNCTION get_visitor_stats(p_workspace_id uuid)
+CREATE OR REPLACE FUNCTION get_visitor_stats(p_workspace_id text)
 RETURNS TABLE (
   client_id    text,
   visit_count  bigint,
