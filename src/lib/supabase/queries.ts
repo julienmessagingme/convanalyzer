@@ -129,25 +129,15 @@ export async function getConversationWithMessages(
 }
 
 /**
- * Get conversations with sentiment_score for the scatter plot.
- * Returns the most recent 5000 conversations that have been sentiment-scored.
+ * Get ALL conversations with sentiment_score for the scatter plot.
+ * Uses fetchAllRows to bypass PostgREST 1000-row default limit.
  */
 export async function getConversationsForScatter(
   workspaceId: string
 ) {
   const supabase = createServiceClient();
 
-  const { data } = await supabase
-    .from("conversations")
-    .select(
-      "id, sentiment_score, urgency_score, message_count, failure_score, type, started_at, created_at"
-    )
-    .eq("workspace_id", workspaceId)
-    .not("sentiment_score", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(5000);
-
-  const conversations = (data as {
+  const conversations = await fetchAllRows<{
     id: string;
     sentiment_score: number;
     urgency_score: number | null;
@@ -156,7 +146,16 @@ export async function getConversationsForScatter(
     type: string;
     started_at: string | null;
     created_at: string;
-  }[]) ?? [];
+  }>(
+    supabase
+      .from("conversations")
+      .select(
+        "id, sentiment_score, urgency_score, message_count, failure_score, type, started_at, created_at"
+      )
+      .eq("workspace_id", workspaceId)
+      .not("sentiment_score", "is", null)
+      .order("created_at", { ascending: false })
+  );
 
   if (conversations.length === 0) return [];
 
