@@ -28,27 +28,28 @@ export default async function ConversationDetailPage({
 
   const { workspaceId, convId } = await params;
 
-  const result = await getConversationWithMessages(workspaceId, convId);
+  const supabase = createServiceClient();
+
+  // Parallel fetch: conversation+messages, conversation tags, all workspace tags
+  const [result, { data: convTagRows }, { data: allTagsData }] =
+    await Promise.all([
+      getConversationWithMessages(workspaceId, convId),
+      supabase
+        .from("conversation_tags")
+        .select("tag_id, assigned_by")
+        .eq("conversation_id", convId),
+      supabase
+        .from("tags")
+        .select("*")
+        .eq("workspace_id", workspaceId),
+    ]);
+
   if (!result) {
     notFound();
   }
 
   const conversation = result.conversation as Conversation;
   const messages = result.messages as Message[];
-
-  // Get tags for this conversation
-  const supabase = createServiceClient();
-
-  const { data: convTagRows } = await supabase
-    .from("conversation_tags")
-    .select("tag_id, assigned_by")
-    .eq("conversation_id", convId);
-
-  // Fetch all tags for this workspace (needed for assignment dropdown and label lookup)
-  const { data: allTagsData } = await supabase
-    .from("tags")
-    .select("*")
-    .eq("workspace_id", workspaceId);
 
   const allTags = (allTagsData as Tag[]) ?? [];
   const tagLookup = new Map<string, Tag>();

@@ -126,21 +126,22 @@ export default async function ConversationsPage({
   // Special case: "untagged" means conversations with NO tags at all
   let tagConvIds: string[] | undefined;
   if (tagId === "untagged") {
-    // Find all conversations that have at least one tag
-    const { data: taggedConvRows } = await supabase
-      .from("conversation_tags")
-      .select("conversation_id");
+    // Parallel fetch: tagged IDs (scoped to workspace) + all conv IDs for tab
+    const [{ data: taggedConvRows }, { data: allConvs }] = await Promise.all([
+      supabase
+        .from("conversation_tags")
+        .select("conversation_id, conversations!inner(workspace_id)")
+        .eq("conversations.workspace_id", workspaceId),
+      supabase
+        .from("conversations")
+        .select("id")
+        .eq("workspace_id", workspaceId)
+        .eq("type", tab),
+    ]);
 
     const taggedIds = new Set(
       (taggedConvRows ?? []).map((r) => r.conversation_id as string)
     );
-
-    // Get all conversation IDs for this workspace
-    const { data: allConvs } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("workspace_id", workspaceId);
-
     const untaggedIds = (allConvs ?? [])
       .map((c) => c.id as string)
       .filter((id) => !taggedIds.has(id));
@@ -228,23 +229,31 @@ export default async function ConversationsPage({
   const totalCount = count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
-  // Build tag map for displayed conversations
+  // Build tag map + resume map in parallel for displayed conversations
   const tagMap: Record<string, { id: string; label: string }[]> = {};
+  const resumeMap: Record<string, string> = {};
   if (convList.length > 0) {
     const convIds = convList.map((c) => c.id);
 
-    const { data: convTags } = await supabase
-      .from("conversation_tags")
-      .select("conversation_id, tag_id")
-      .in("conversation_id", convIds);
+    const [{ data: convTags }, { data: clientMessages }] = await Promise.all([
+      supabase
+        .from("conversation_tags")
+        .select("conversation_id, tag_id")
+        .in("conversation_id", convIds),
+      supabase
+        .from("messages")
+        .select("conversation_id, content")
+        .eq("workspace_id", workspaceId)
+        .eq("sender_type", "client")
+        .in("conversation_id", convIds)
+        .order("sequence", { ascending: true }),
+    ]);
 
     if (convTags && convTags.length > 0) {
-      // Build tag label lookup
       const tagLookup = new Map<string, { id: string; label: string }>();
       for (const t of allTags) {
         tagLookup.set(t.id, { id: t.id, label: t.label });
       }
-
       for (const ct of convTags) {
         const tagInfo = tagLookup.get(ct.tag_id);
         if (tagInfo) {
@@ -255,19 +264,6 @@ export default async function ConversationsPage({
         }
       }
     }
-  }
-
-  // Build resume map: conversation ID -> first client message content (truncated 200 chars)
-  const resumeMap: Record<string, string> = {};
-  if (convList.length > 0) {
-    const convIds = convList.map((c) => c.id);
-    const { data: clientMessages } = await supabase
-      .from("messages")
-      .select("conversation_id, content")
-      .eq("workspace_id", workspaceId)
-      .eq("sender_type", "client")
-      .in("conversation_id", convIds)
-      .order("sequence", { ascending: true });
 
     if (clientMessages) {
       for (const msg of clientMessages) {

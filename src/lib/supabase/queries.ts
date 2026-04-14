@@ -105,21 +105,22 @@ export async function getConversationWithMessages(
 ) {
   const supabase = createServiceClient();
 
-  const { data: conversation } = await supabase
-    .from("conversations")
-    .select("*")
-    .eq("workspace_id", workspaceId)
-    .eq("id", conversationId)
-    .single();
+  const [{ data: conversation }, { data: messages }] = await Promise.all([
+    supabase
+      .from("conversations")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .eq("id", conversationId)
+      .single(),
+    supabase
+      .from("messages")
+      .select("*")
+      .eq("conversation_id", conversationId)
+      .eq("workspace_id", workspaceId)
+      .order("sequence", { ascending: true }),
+  ]);
 
   if (!conversation) return null;
-
-  const { data: messages } = await supabase
-    .from("messages")
-    .select("*")
-    .eq("conversation_id", conversationId)
-    .eq("workspace_id", workspaceId)
-    .order("sequence", { ascending: true });
 
   return {
     conversation,
@@ -129,14 +130,24 @@ export async function getConversationWithMessages(
 
 /**
  * Get conversations with sentiment_score for the scatter plot.
- * Returns the most recent conversations that have been sentiment-scored.
+ * Returns the most recent 5000 conversations that have been sentiment-scored.
  */
 export async function getConversationsForScatter(
   workspaceId: string
 ) {
   const supabase = createServiceClient();
 
-  const conversations = await fetchAllRows<{
+  const { data } = await supabase
+    .from("conversations")
+    .select(
+      "id, sentiment_score, urgency_score, message_count, failure_score, type, started_at, created_at"
+    )
+    .eq("workspace_id", workspaceId)
+    .not("sentiment_score", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(5000);
+
+  const conversations = (data as {
     id: string;
     sentiment_score: number;
     urgency_score: number | null;
@@ -145,16 +156,7 @@ export async function getConversationsForScatter(
     type: string;
     started_at: string | null;
     created_at: string;
-  }>(
-    supabase
-      .from("conversations")
-      .select(
-        "id, sentiment_score, urgency_score, message_count, failure_score, type, started_at, created_at"
-      )
-      .eq("workspace_id", workspaceId)
-      .not("sentiment_score", "is", null)
-      .order("created_at", { ascending: false })
-  );
+  }[]) ?? [];
 
   if (conversations.length === 0) return [];
 
