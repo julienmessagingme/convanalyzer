@@ -25,32 +25,42 @@ export interface SearchResult {
 
 /**
  * Text search: exact word match on client messages content.
- * Uses PostgreSQL word-boundary regex (\m...\M) for exact word matching
- * so that searching "con" does NOT match "contrat".
+ * Uses ILIKE with surrounding non-alphanumeric anchors so that
+ * searching "con" does NOT match "contrat".
+ * Falls back to substring match if < 3 chars (too short for word match).
  */
 async function searchConversationsByText(
   workspaceId: string,
   query: string
 ): Promise<Map<string, string>> {
   const supabase = createServiceClient();
-  // Escape regex special chars so user input is treated as literal text
-  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // \m = word start, \M = word end (PostgreSQL regex word boundaries)
-  const pattern = `\\m${escaped}\\M`;
+  const escaped = query.replace(/[%_\\]/g, (ch) => `\\${ch}`);
+
+  // For short queries (< 3 chars), use substring match to avoid empty results
+  // For longer queries, fetch with substring then filter in JS for exact word
+  const pattern = `%${escaped}%`;
 
   const { data } = await supabase
     .from("messages")
     .select("conversation_id, content")
     .eq("workspace_id", workspaceId)
     .eq("sender_type", "client")
-    .filter("content", "~*", pattern)
-    .limit(200);
+    .ilike("content", pattern)
+    .limit(500);
+
+  // Build a word-boundary regex for JS-side exact word filtering
+  const wordRegex = new RegExp(
+    `(^|[^a-zA-ZÀ-ÿ0-9])${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-zA-ZÀ-ÿ0-9]|$)`,
+    "i"
+  );
 
   const results = new Map<string, string>();
   if (data) {
     for (const msg of data) {
       if (!results.has(msg.conversation_id)) {
         const content = msg.content || "";
+        // Filter for exact word match (skip if query is < 3 chars to be lenient)
+        if (query.length >= 3 && !wordRegex.test(content)) continue;
         results.set(
           msg.conversation_id,
           content.length > 150 ? content.slice(0, 150) + "..." : content
