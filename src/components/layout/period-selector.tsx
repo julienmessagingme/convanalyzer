@@ -12,6 +12,13 @@ interface PeriodSelectorProps {
    * Set from the server page based on isRestrictedSession.
    */
   restrictedMode?: boolean;
+  /** When provided, called instead of router.push on period change. */
+  onPeriodChange?: (period: string) => void;
+  /** When provided, called instead of router.push on date input change. */
+  onDateChange?: (key: "date_from" | "date_to", value: string) => void;
+  /** Controlled date values (used when onDateChange is provided). */
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 const periods = [
@@ -31,6 +38,10 @@ export function PeriodSelector({
   currentPeriod,
   currentGranularity,
   restrictedMode = false,
+  onPeriodChange,
+  onDateChange,
+  dateFrom: controlledDateFrom,
+  dateTo: controlledDateTo,
 }: PeriodSelectorProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -52,6 +63,10 @@ export function PeriodSelector({
   );
 
   function handlePeriodChange(period: string) {
+    if (onPeriodChange) {
+      onPeriodChange(period);
+      return;
+    }
     const updates: Record<string, string | null> = { period };
     if (period !== "custom") {
       updates.date_from = null;
@@ -64,7 +79,11 @@ export function PeriodSelector({
     router.push(`${pathname}?${createQueryString({ granularity })}`);
   }
 
-  function handleDateChange(key: "date_from" | "date_to", value: string) {
+  function handleDateInputChange(key: "date_from" | "date_to", value: string) {
+    if (onDateChange) {
+      onDateChange(key, value);
+      return;
+    }
     router.push(`${pathname}?${createQueryString({ [key]: value })}`);
   }
 
@@ -117,15 +136,15 @@ export function PeriodSelector({
           <div className="flex items-center gap-2 ml-3">
             <input
               type="date"
-              value={searchParams.get("date_from") ?? ""}
-              onChange={(e) => handleDateChange("date_from", e.target.value)}
+              value={controlledDateFrom ?? searchParams.get("date_from") ?? ""}
+              onChange={(e) => handleDateInputChange("date_from", e.target.value)}
               className="px-2 py-1 text-sm border border-gray-200 rounded-md"
             />
             <span className="text-gray-400 text-sm">-</span>
             <input
               type="date"
-              value={searchParams.get("date_to") ?? ""}
-              onChange={(e) => handleDateChange("date_to", e.target.value)}
+              value={controlledDateTo ?? searchParams.get("date_to") ?? ""}
+              onChange={(e) => handleDateInputChange("date_to", e.target.value)}
               className="px-2 py-1 text-sm border border-gray-200 rounded-md"
             />
           </div>

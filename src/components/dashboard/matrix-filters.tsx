@@ -10,32 +10,63 @@ const TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "agent", label: "Humain" },
 ];
 
-export function MatrixFilters() {
+interface MatrixFiltersProps {
+  /** Controlled state (when provided, component is controlled by parent). */
+  matrixType?: string;
+  matrixQ?: string;
+  matrixMode?: string;
+  onTypeChange?: (type: string) => void;
+  onSearch?: (query: string, mode: string) => void;
+  onClear?: () => void;
+}
+
+export function MatrixFilters({
+  matrixType,
+  matrixQ,
+  matrixMode,
+  onTypeChange,
+  onSearch,
+  onClear,
+}: MatrixFiltersProps) {
+  const controlled = onTypeChange !== undefined;
+
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const [type, setType] = useState<string>(
-    searchParams.get("matrix_type") ?? "all"
+    matrixType ?? searchParams.get("matrix_type") ?? "all"
   );
   const [query, setQuery] = useState<string>(
-    searchParams.get("matrix_q") ?? ""
+    matrixQ ?? searchParams.get("matrix_q") ?? ""
   );
   const [mode, setMode] = useState<string>(
-    searchParams.get("matrix_mode") ?? "combined"
+    matrixMode ?? searchParams.get("matrix_mode") ?? "combined"
   );
 
-  // Re-sync when URL changes (e.g. browser back/forward)
+  // Sync from controlled props
   useEffect(() => {
-    setType(searchParams.get("matrix_type") ?? "all");
-    setQuery(searchParams.get("matrix_q") ?? "");
-    setMode(searchParams.get("matrix_mode") ?? "combined");
-  }, [searchParams]);
+    if (controlled) {
+      setType(matrixType ?? "all");
+      setQuery(matrixQ ?? "");
+      setMode(matrixMode ?? "combined");
+    }
+  }, [controlled, matrixType, matrixQ, matrixMode]);
+
+  // Re-sync when URL changes (uncontrolled mode only)
+  useEffect(() => {
+    if (!controlled) {
+      setType(searchParams.get("matrix_type") ?? "all");
+      setQuery(searchParams.get("matrix_q") ?? "");
+      setMode(searchParams.get("matrix_mode") ?? "combined");
+    }
+  }, [controlled, searchParams]);
 
   const applyFilters = (
     nextType: string,
     nextQuery: string,
     nextMode: string
   ) => {
+    if (controlled) return; // controlled mode uses callbacks
     const params = new URLSearchParams(searchParams.toString());
 
     if (nextType === "all") params.delete("matrix_type");
@@ -56,23 +87,39 @@ export function MatrixFilters() {
 
   const handleTypeChange = (nextType: string) => {
     setType(nextType);
-    applyFilters(nextType, query, mode);
+    if (onTypeChange) {
+      onTypeChange(nextType);
+    } else {
+      applyFilters(nextType, query, mode);
+    }
   };
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    applyFilters(type, query, mode);
+    if (onSearch) {
+      onSearch(query, mode);
+    } else {
+      applyFilters(type, query, mode);
+    }
   };
 
   const handleClearQuery = () => {
     setQuery("");
-    applyFilters(type, "", mode);
+    if (onClear) {
+      onClear();
+    } else {
+      applyFilters(type, "", mode);
+    }
   };
 
   const handleModeChange = (nextMode: string) => {
     setMode(nextMode);
     if (query.trim()) {
-      applyFilters(type, query, nextMode);
+      if (onSearch) {
+        onSearch(query, nextMode);
+      } else {
+        applyFilters(type, query, nextMode);
+      }
     }
   };
 
