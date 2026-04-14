@@ -100,3 +100,15 @@ export interface ConversationTag {
   created_at: string;
 }
 
+export interface KbSuggestion {
+  id: string;
+  workspace_id: string;
+  question: string;
+  suggested_answer: string;
+  source_conversation_ids: string[];
+  frequency: number;
+  impact_score: number;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+}
+

@@ -1,6 +1,6 @@
 import { createServiceClient } from "./server";
 import { fetchAllRows } from "./paginate";
-import type { Tag, ConversationTag } from "@/types/database";
+import type { Tag, ConversationTag, KbSuggestion } from "@/types/database";
 
 /**
  * Get aggregate metrics for a workspace within a date range.
@@ -126,6 +126,24 @@ export async function getConversationWithMessages(
     conversation,
     messages: messages ?? [],
   };
+}
+
+/**
+ * Get KB suggestions for a workspace, ordered by impact_score and frequency.
+ */
+export async function getKbSuggestions(
+  workspaceId: string
+): Promise<KbSuggestion[]> {
+  const supabase = createServiceClient();
+
+  const { data } = await supabase
+    .from("kb_suggestions")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .order("impact_score", { ascending: false })
+    .order("frequency", { ascending: false });
+
+  return (data as KbSuggestion[]) ?? [];
 }
 
 /**

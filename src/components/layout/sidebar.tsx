@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, MessageSquare, Tags, BarChart3, Search, Repeat, Layers, Users } from "lucide-react";
+import { LayoutDashboard, MessageSquare, Tags, Lightbulb, BarChart3, Search, Repeat, Layers, Users } from "lucide-react";
 
 interface SidebarProps {
   workspaceId: string;
@@ -73,6 +73,13 @@ const navItems = [
     label: "Tags",
     href: (id: string) => `/${id}/tags`,
     icon: Tags,
+    exact: false,
+    alwaysAvailable: false,
+  },
+  {
+    label: "Suggestions KB",
+    href: (id: string) => `/${id}/suggestions`,
+    icon: Lightbulb,
     exact: false,
     alwaysAvailable: false,
   },
