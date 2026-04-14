@@ -24,24 +24,26 @@ export interface SearchResult {
 }
 
 /**
- * Text search: ILIKE on client messages content.
- * Returns a Set of conversation IDs + snippet per conversation.
+ * Text search: exact word match on client messages content.
+ * Uses PostgreSQL word-boundary regex (\m...\M) for exact word matching
+ * so that searching "con" does NOT match "contrat".
  */
 async function searchConversationsByText(
   workspaceId: string,
   query: string
 ): Promise<Map<string, string>> {
   const supabase = createServiceClient();
-  // Escape ILIKE wildcards so user input is treated as literal text
-  const escaped = query.replace(/[%_\\]/g, (ch) => `\\${ch}`);
-  const pattern = `%${escaped}%`;
+  // Escape regex special chars so user input is treated as literal text
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // \m = word start, \M = word end (PostgreSQL regex word boundaries)
+  const pattern = `\\m${escaped}\\M`;
 
   const { data } = await supabase
     .from("messages")
     .select("conversation_id, content")
     .eq("workspace_id", workspaceId)
     .eq("sender_type", "client")
-    .ilike("content", pattern)
+    .filter("content", "~*", pattern)
     .limit(200);
 
   const results = new Map<string, string>();
