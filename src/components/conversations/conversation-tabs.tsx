@@ -8,12 +8,14 @@ interface ConversationTabsProps {
   activeTab: "bot" | "agent";
   botCount: number;
   agentCount: number;
+  onTabChange?: (tab: "bot" | "agent") => void;
 }
 
 export function ConversationTabs({
   activeTab,
   botCount,
   agentCount,
+  onTabChange,
 }: ConversationTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -21,13 +23,16 @@ export function ConversationTabs({
 
   const switchTab = useCallback(
     (tab: "bot" | "agent") => {
+      if (onTabChange) {
+        onTabChange(tab);
+        return;
+      }
       const params = new URLSearchParams(searchParams.toString());
       params.set("tab", tab);
-      // Reset to page 1 on tab change
       params.delete("page");
       router.push(`${pathname}?${params.toString()}`);
     },
-    [router, searchParams, pathname]
+    [router, searchParams, pathname, onTabChange]
   );
 
   const tabs = [

@@ -9,33 +9,37 @@ interface FilterBarProps {
   tags: Tag[];
   currentFilters: Record<string, string>;
   activeTab?: "bot" | "agent";
+  onFilterChange?: (key: string, value: string) => void;
 }
 
-export function FilterBar({ tags, currentFilters, activeTab }: FilterBarProps) {
+export function FilterBar({ tags, currentFilters, activeTab, onFilterChange }: FilterBarProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
 
   const [localQuery, setLocalQuery] = useState<string>(currentFilters.q ?? "");
 
-  // Keep local query in sync with URL when navigating
+  // Keep local query in sync when parent changes filters
   useEffect(() => {
     setLocalQuery(currentFilters.q ?? "");
   }, [currentFilters.q]);
 
   const updateFilter = useCallback(
     (key: string, value: string) => {
+      if (onFilterChange) {
+        onFilterChange(key, value);
+        return;
+      }
       const params = new URLSearchParams(searchParams.toString());
       if (value) {
         params.set(key, value);
       } else {
         params.delete(key);
       }
-      // Reset to page 1 on filter change
       params.delete("page");
       router.push(`${pathname}?${params.toString()}`);
     },
-    [router, searchParams, pathname]
+    [router, searchParams, pathname, onFilterChange]
   );
 
   const submitQuery = useCallback(() => {

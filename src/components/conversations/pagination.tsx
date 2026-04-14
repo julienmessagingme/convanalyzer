@@ -6,15 +6,20 @@ import { useCallback } from "react";
 interface PaginationProps {
   currentPage: number;
   totalPages: number;
+  onPageChange?: (page: number) => void;
 }
 
-export function Pagination({ currentPage, totalPages }: PaginationProps) {
+export function Pagination({ currentPage, totalPages, onPageChange }: PaginationProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
 
   const goToPage = useCallback(
     (page: number) => {
+      if (onPageChange) {
+        onPageChange(page);
+        return;
+      }
       const params = new URLSearchParams(searchParams.toString());
       if (page <= 1) {
         params.delete("page");
@@ -23,7 +28,7 @@ export function Pagination({ currentPage, totalPages }: PaginationProps) {
       }
       router.push(`${pathname}?${params.toString()}`);
     },
-    [router, searchParams, pathname]
+    [router, searchParams, pathname, onPageChange]
   );
 
   if (totalPages <= 1) return null;
