@@ -121,17 +121,18 @@ export async function suggestTags(workspaceId: string): Promise<number> {
     `[tag-suggester] Analyzing ${conversationTexts.length} untagged conversations for workspace ${workspaceId}`
   );
 
-  // Fetch existing tags and suggestions BEFORE calling LLM (to include in prompt)
-  const { data: existingTags } = await supabase
-    .from("tags")
-    .select("label")
-    .eq("workspace_id", workspaceId);
-
-  const { data: existingSuggestions } = await supabase
-    .from("suggested_tags")
-    .select("label")
-    .eq("workspace_id", workspaceId)
-    .in("status", ["pending", "rejected"]);
+  // Fetch existing tags and suggestions in parallel BEFORE calling LLM (to include in prompt)
+  const [{ data: existingTags }, { data: existingSuggestions }] = await Promise.all([
+    supabase
+      .from("tags")
+      .select("label")
+      .eq("workspace_id", workspaceId),
+    supabase
+      .from("suggested_tags")
+      .select("label")
+      .eq("workspace_id", workspaceId)
+      .in("status", ["pending", "rejected"]),
+  ]);
 
   const existingLabels = new Set(
     [

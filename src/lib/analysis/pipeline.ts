@@ -85,10 +85,10 @@ export async function runAnalysisPipeline(): Promise<PipelineResult> {
     }
 
     if (workspaces && workspaces.length > 0) {
-      for (const ws of workspaces) {
-        const suggested = await suggestTags(ws.id as string);
-        tagsSuggested += suggested;
-      }
+      const results = await Promise.all(
+        workspaces.map((ws) => suggestTags(ws.id as string))
+      );
+      tagsSuggested = results.reduce((sum, n) => sum + n, 0);
     }
 
     console.log(
@@ -114,10 +114,10 @@ export async function runAnalysisPipeline(): Promise<PipelineResult> {
     }
 
     if (workspaces && workspaces.length > 0) {
-      for (const ws of workspaces) {
-        const classified = await classifyConversationTags(ws.id as string);
-        tagsClassified += classified;
-      }
+      const results = await Promise.all(
+        workspaces.map((ws) => classifyConversationTags(ws.id as string))
+      );
+      tagsClassified = results.reduce((sum, n) => sum + n, 0);
     }
 
     console.log(
@@ -143,10 +143,10 @@ export async function runAnalysisPipeline(): Promise<PipelineResult> {
     }
 
     if (workspaces6 && workspaces6.length > 0) {
-      for (const ws of workspaces6) {
-        const suggested = await generateKbSuggestions(ws.id as string);
-        kbSuggested += suggested;
-      }
+      const results = await Promise.all(
+        workspaces6.map((ws) => generateKbSuggestions(ws.id as string))
+      );
+      kbSuggested = results.reduce((sum, n) => sum + n, 0);
     }
 
     console.log(
