@@ -4,6 +4,11 @@ import type { Tag, ConversationTag, KbSuggestion } from "@/types/database";
 
 /**
  * Get aggregate metrics for a workspace within a date range.
+ *
+ * Uses the `get_dashboard_metrics` RPC (migration 014) which collapses
+ * 4 COUNT(*) Promise.all queries into a single COUNT FILTER query.
+ * Falls back to the 4-query version if the RPC is not yet deployed,
+ * so a code rollout that lands before the migration does not break.
  */
 export async function getWorkspaceMetrics(
   workspaceId: string,
@@ -11,6 +16,43 @@ export async function getWorkspaceMetrics(
   dateTo: string
 ) {
   const supabase = createServiceClient();
+  const dateToEnd = `${dateTo}T23:59:59`;
+
+  // Fast path: single RPC call.
+  // Note: RETURNS TABLE always yields an array via PostgREST, so we unwrap
+  // data[0] manually instead of using .single() (matches the existing
+  // get_visitor_stats call pattern in src/app/api/visiteurs/list/route.ts).
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    "get_dashboard_metrics",
+    {
+      p_workspace_id: workspaceId,
+      p_date_from: dateFrom,
+      p_date_to: dateToEnd,
+    }
+  );
+
+  const row = Array.isArray(rpcData) ? rpcData[0] : null;
+  if (!rpcError && row) {
+    const total = Number(row.total_conversations) || 0;
+    const botTotal = Number(row.bot_conversations) || 0;
+    const agentTotal = Number(row.agent_conversations) || 0;
+    const escalated = Number(row.escalated_conversations) || 0;
+    const tauxTransfert = botTotal > 0 ? (escalated / botTotal) * 100 : 0;
+    return {
+      totalConversations: total,
+      botConversations: botTotal,
+      agentConversations: agentTotal,
+      escalatedConversations: escalated,
+      tauxTransfert,
+    };
+  }
+
+  // Fallback: legacy 4-query version. Used only if the RPC is missing
+  // (e.g. migration 014 not applied yet). Logged so we notice.
+  console.warn(
+    "[getWorkspaceMetrics] RPC get_dashboard_metrics failed, falling back to 4x COUNT:",
+    rpcError?.message ?? "no row returned"
+  );
 
   const [
     { count: totalConversations },
@@ -23,14 +65,14 @@ export async function getWorkspaceMetrics(
       .select("*", { count: "exact", head: true })
       .eq("workspace_id", workspaceId)
       .gte("created_at", dateFrom)
-      .lte("created_at", `${dateTo}T23:59:59`),
+      .lte("created_at", dateToEnd),
     supabase
       .from("conversations")
       .select("*", { count: "exact", head: true })
       .eq("workspace_id", workspaceId)
       .eq("type", "bot")
       .gte("created_at", dateFrom)
-      .lte("created_at", `${dateTo}T23:59:59`),
+      .lte("created_at", dateToEnd),
     supabase
       .from("conversations")
       .select("*", { count: "exact", head: true })
@@ -38,14 +80,14 @@ export async function getWorkspaceMetrics(
       .eq("type", "bot")
       .eq("escalated", true)
       .gte("created_at", dateFrom)
-      .lte("created_at", `${dateTo}T23:59:59`),
+      .lte("created_at", dateToEnd),
     supabase
       .from("conversations")
       .select("*", { count: "exact", head: true })
       .eq("workspace_id", workspaceId)
       .eq("type", "agent")
       .gte("created_at", dateFrom)
-      .lte("created_at", `${dateTo}T23:59:59`),
+      .lte("created_at", dateToEnd),
   ]);
 
   const total = totalConversations ?? 0;

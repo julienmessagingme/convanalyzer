@@ -21,5 +21,11 @@ export async function GET(req: NextRequest) {
   }
 
   const metrics = await getWorkspaceMetrics(workspaceId, dateFrom, dateTo);
-  return NextResponse.json(metrics);
+  return NextResponse.json(metrics, {
+    headers: {
+      // Workspace-scoped data: keep CDN out (`private`), let browser cache
+      // for 30s and serve stale up to 2 min while revalidating.
+      "Cache-Control": "private, max-age=30, stale-while-revalidate=120",
+    },
+  });
 }

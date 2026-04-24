@@ -17,5 +17,13 @@ export async function GET(req: NextRequest) {
   }
 
   const conversations = await getConversationsForScatter(workspaceId);
-  return NextResponse.json({ conversations });
+  return NextResponse.json(
+    { conversations },
+    {
+      headers: {
+        // Workspace-scoped data: 30s browser cache, 2 min SWR window.
+        "Cache-Control": "private, max-age=30, stale-while-revalidate=120",
+      },
+    }
+  );
 }

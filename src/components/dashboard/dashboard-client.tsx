@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { subDays, formatISO } from "date-fns";
 import {
   TrendingDown,
@@ -163,31 +163,55 @@ export function DashboardClient({
 
   // ---------- Fetch: metrics (on period/date change) ----------
   useEffect(() => {
+    // AbortController prevents stale state when the user changes period
+    // rapidly (e.g. 7d -> 30d -> 90d): in-flight requests for outdated
+    // ranges are cancelled before they can overwrite fresher results.
+    const controller = new AbortController();
     setMetricsLoading(true);
     const params = new URLSearchParams({
       workspace_id: workspaceId,
       date_from: dateFrom,
       date_to: dateTo,
     });
-    fetch(`${basePath}/api/dashboard/metrics?${params}`)
+    fetch(`${basePath}/api/dashboard/metrics?${params}`, {
+      signal: controller.signal,
+    })
       .then((r) => r.json())
       .then((data) => {
         setMetrics(data);
         setMetricsLoading(false);
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError") return;
+        console.error("[dashboard] metrics fetch failed:", err);
+        setMetricsLoading(false);
       });
+
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, dateFrom, dateTo]);
 
   // ---------- Matrix search (triggered by MatrixFilters callback) ----------
+  // Track in-flight matrix-search request so we can cancel it when a newer
+  // query starts. Without this, a slow request can overwrite a faster one
+  // that started later.
+  const matrixSearchAbortRef = useRef<AbortController | null>(null);
+
   const handleMatrixSearch = useCallback(
     (query: string, mode: string) => {
       setMatrixQ(query);
       setMatrixMode(mode);
 
       if (!query.trim()) {
+        matrixSearchAbortRef.current?.abort();
         setSearchMatchIds(null);
         return;
       }
+
+      // Cancel previous in-flight search.
+      matrixSearchAbortRef.current?.abort();
+      const controller = new AbortController();
+      matrixSearchAbortRef.current = controller;
 
       setSearchLoading(true);
       const params = new URLSearchParams({
@@ -195,10 +219,17 @@ export function DashboardClient({
         q: query.trim(),
         mode,
       });
-      fetch(`${basePath}/api/dashboard/matrix-search?${params}`)
+      fetch(`${basePath}/api/dashboard/matrix-search?${params}`, {
+        signal: controller.signal,
+      })
         .then((r) => r.json())
         .then((data) => {
           setSearchMatchIds(new Set(data.matchIds ?? []));
+          setSearchLoading(false);
+        })
+        .catch((err) => {
+          if (err?.name === "AbortError") return;
+          console.error("[dashboard] matrix-search failed:", err);
           setSearchLoading(false);
         });
     },

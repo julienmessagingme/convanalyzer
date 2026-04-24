@@ -1,30 +1,27 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import {
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Line,
-  ComposedChart,
-  Legend,
-} from "recharts";
+import dynamic from "next/dynamic";
 import type { Tag } from "@/types/database";
+import type { AnalyticsDataPoint } from "./analytics-chart";
+
+// Lazy-load recharts (~150 KB gzipped) only when this component renders.
+// SSR is disabled since the chart needs client-side dimensions anyway.
+const AnalyticsChart = dynamic(() => import("./analytics-chart"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-80">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+    </div>
+  ),
+});
 
 interface AnalyticsDashboardProps {
   workspaceId: string;
   tags: Tag[];
 }
 
-interface DataPoint {
-  date: string;
-  count: number;
-  avg_sentiment?: number;
-  avg_urgency?: number;
-}
+type DataPoint = AnalyticsDataPoint;
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -110,12 +107,6 @@ export function AnalyticsDashboard({
 
   const tagLabel = (id: string) =>
     tags.find((t) => t.id === id)?.label ?? id;
-
-  // Format date for display
-  const formatDate = (d: string) => {
-    const parts = d.split("-");
-    return `${parts[2]}/${parts[1]}`;
-  };
 
   const totalConversations = data.reduce((s, d) => s + d.count, 0);
   const avgPerDay =
@@ -268,98 +259,11 @@ export function AnalyticsDashboard({
             Aucune donnee pour cette selection
           </div>
         ) : (
-          <div style={{ width: "100%", height: 320 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis
-                  dataKey="date"
-                  tickFormatter={formatDate}
-                  tick={{ fontSize: 12, fill: "#6b7280" }}
-                />
-                <YAxis
-                  yAxisId="count"
-                  tick={{ fontSize: 12, fill: "#6b7280" }}
-                  label={{
-                    value: "Conversations",
-                    angle: -90,
-                    position: "insideLeft",
-                    style: { fontSize: 11, fill: "#9ca3af" },
-                  }}
-                />
-                {(showSentiment || showUrgency) && (
-                  <YAxis
-                    yAxisId="score"
-                    orientation="right"
-                    domain={[-5, 5]}
-                    tick={{ fontSize: 12, fill: "#6b7280" }}
-                    label={{
-                      value: "Score",
-                      angle: 90,
-                      position: "insideRight",
-                      style: { fontSize: 11, fill: "#9ca3af" },
-                    }}
-                  />
-                )}
-                <Tooltip
-                  isAnimationActive={false}
-                  contentStyle={{
-                    borderRadius: 8,
-                    border: "1px solid #e5e7eb",
-                    fontSize: 13,
-                  }}
-                  formatter={(value: unknown, name: unknown) => {
-                    const labels: Record<string, string> = {
-                      count: "Conversations",
-                      avg_sentiment: "Sentiment moy.",
-                      avg_urgency: "Urgence moy.",
-                    };
-                    return [String(value), labels[String(name)] ?? String(name)];
-                  }}
-                  labelFormatter={(label: unknown) => formatDate(String(label))}
-                />
-                <Legend
-                  formatter={(value: string) => {
-                    const labels: Record<string, string> = {
-                      count: "Conversations",
-                      avg_sentiment: "Sentiment moy.",
-                      avg_urgency: "Urgence moy.",
-                    };
-                    return labels[value] ?? value;
-                  }}
-                />
-                <Bar
-                  yAxisId="count"
-                  dataKey="count"
-                  fill="#3b82f6"
-                  radius={[4, 4, 0, 0]}
-                  barSize={30}
-                />
-                {showSentiment && (
-                  <Line
-                    yAxisId="score"
-                    type="monotone"
-                    dataKey="avg_sentiment"
-                    stroke="#10b981"
-                    strokeWidth={2}
-                    dot={{ r: 4, fill: "#10b981" }}
-                    isAnimationActive={false}
-                  />
-                )}
-                {showUrgency && (
-                  <Line
-                    yAxisId="score"
-                    type="monotone"
-                    dataKey="avg_urgency"
-                    stroke="#ef4444"
-                    strokeWidth={2}
-                    dot={{ r: 4, fill: "#ef4444" }}
-                    isAnimationActive={false}
-                  />
-                )}
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
+          <AnalyticsChart
+            data={data}
+            showSentiment={showSentiment}
+            showUrgency={showUrgency}
+          />
         )}
       </div>
     </div>

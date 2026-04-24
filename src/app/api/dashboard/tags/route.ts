@@ -17,5 +17,13 @@ export async function GET(req: NextRequest) {
   }
 
   const tags = await getTagsByFrequency(workspaceId);
-  return NextResponse.json({ tags });
+  return NextResponse.json(
+    { tags },
+    {
+      headers: {
+        // Tags change less frequently than metrics: 60s browser cache.
+        "Cache-Control": "private, max-age=60, stale-while-revalidate=300",
+      },
+    }
+  );
 }

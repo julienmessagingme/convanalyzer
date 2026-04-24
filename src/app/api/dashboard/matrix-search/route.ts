@@ -32,5 +32,13 @@ export async function GET(req: NextRequest) {
     matchIds.push(m.conversation.id);
   }
 
-  return NextResponse.json({ matchIds });
+  return NextResponse.json(
+    { matchIds },
+    {
+      headers: {
+        // Same q+mode rarely changes meaning within a minute.
+        "Cache-Control": "private, max-age=60, stale-while-revalidate=300",
+      },
+    }
+  );
 }

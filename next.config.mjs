@@ -2,7 +2,12 @@
 const nextConfig = {
   basePath: "/analyze",
   experimental: {
-    optimizePackageImports: ["lucide-react", "date-fns"],
+    optimizePackageImports: [
+      "lucide-react",
+      "date-fns",
+      "recharts",
+      "@supabase/supabase-js",
+    ],
   },
 };
 
