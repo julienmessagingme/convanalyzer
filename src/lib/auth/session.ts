@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import bcrypt from "bcryptjs";
 import { cookies, headers } from "next/headers";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -285,51 +286,58 @@ export async function canAccessWorkspace(
  *     still validate the reverse-proxy headers directly because the
  *     shared PROXY_AUTH_SECRET is the true source of trust.
  */
-export async function getSessionFromMiddlewareHeader(): Promise<Session | null> {
-  const h = await headers();
+// Wrapped in React.cache() so a single request that needs the session in
+// the layout, the page, and any nested server components only pays the
+// JWT verify / cookie parse cost once. cache() is a no-op in route
+// handlers (no React render scope), which is fine — it just doesn't
+// dedup there.
+export const getSessionFromMiddlewareHeader = cache(
+  async function _getSessionFromMiddlewareHeader(): Promise<Session | null> {
+    const h = await headers();
 
-  // 1. Middleware-injected header
-  const token = h.get("x-ca-session");
-  if (token) {
-    const session = await verifySession(token);
-    if (session) return session;
+    // 1. Middleware-injected header
+    const token = h.get("x-ca-session");
+    if (token) {
+      const session = await verifySession(token);
+      if (session) return session;
+    }
+
+    // 2. Existing browser cookie
+    const cookieSession = await getSession();
+    if (cookieSession) return cookieSession;
+
+    // 3. Fresh SSO proxy headers (first visit)
+    const proxySecret = h.get(PROXY_HEADER_SECRET);
+    if (!proxySecret) return null;
+
+    let expectedSecret: string;
+    try {
+      expectedSecret = getProxyAuthSecret();
+    } catch {
+      return null;
+    }
+    if (proxySecret !== expectedSecret) return null;
+
+    const email = h.get(PROXY_HEADER_EMAIL);
+    const externalId = h.get(PROXY_HEADER_ID);
+    const clientHost = (
+      h.get("x-client-hostname") ??
+      h.get("x-forwarded-host") ??
+      ""
+    )
+      .toLowerCase()
+      .split(":")[0];
+    if (!email || !externalId || !clientHost) return null;
+
+    const now = Math.floor(Date.now() / 1000);
+    return {
+      userId: `sso:${clientHost}:${externalId}`,
+      email: email.toLowerCase(),
+      role: "client",
+      authType: "sso",
+      externalHostname: clientHost,
+      iat: now,
+      exp: now + SSO_TTL_SECONDS,
+    };
   }
-
-  // 2. Existing browser cookie
-  const cookieSession = await getSession();
-  if (cookieSession) return cookieSession;
-
-  // 3. Fresh SSO proxy headers (first visit)
-  const proxySecret = h.get(PROXY_HEADER_SECRET);
-  if (!proxySecret) return null;
-
-  let expectedSecret: string;
-  try {
-    expectedSecret = getProxyAuthSecret();
-  } catch {
-    return null;
-  }
-  if (proxySecret !== expectedSecret) return null;
-
-  const email = h.get(PROXY_HEADER_EMAIL);
-  const externalId = h.get(PROXY_HEADER_ID);
-  const clientHost = (
-    h.get("x-client-hostname") ??
-    h.get("x-forwarded-host") ??
-    ""
-  )
-    .toLowerCase()
-    .split(":")[0];
-  if (!email || !externalId || !clientHost) return null;
-
-  const now = Math.floor(Date.now() / 1000);
-  return {
-    userId: `sso:${clientHost}:${externalId}`,
-    email: email.toLowerCase(),
-    role: "client",
-    authType: "sso",
-    externalHostname: clientHost,
-    iat: now,
-    exp: now + SSO_TTL_SECONDS,
-  };
-}
+);

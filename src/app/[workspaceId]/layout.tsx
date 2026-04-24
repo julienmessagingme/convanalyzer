@@ -18,19 +18,23 @@ export default async function WorkspaceLayout({
 }: WorkspaceLayoutProps) {
   const { workspaceId } = await params;
 
-  const session = await getSessionFromMiddlewareHeader();
-  if (!session) redirect("/login");
-
+  // Fire both lookups in parallel: the session check and the workspace
+  // existence check are independent (they are only reconciled by the
+  // canAccessWorkspace call below). On a typical dashboard load this
+  // saves a full Supabase round-trip on the critical path.
   const supabase = createServiceClient();
-  const { data: workspace } = await supabase
-    .from("workspaces")
-    .select("id, name")
-    .eq("id", workspaceId)
-    .single();
+  const [session, workspaceRes] = await Promise.all([
+    getSessionFromMiddlewareHeader(),
+    supabase
+      .from("workspaces")
+      .select("id, name")
+      .eq("id", workspaceId)
+      .single(),
+  ]);
 
-  if (!workspace) {
-    notFound();
-  }
+  if (!session) redirect("/login");
+  const workspace = workspaceRes.data;
+  if (!workspace) notFound();
 
   const allowed = await canAccessWorkspace(session, workspace.id);
   if (!allowed) {
