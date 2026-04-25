@@ -2,8 +2,14 @@
 
 import { useState } from "react";
 import { Download, Loader2 } from "lucide-react";
-import type { DashboardPdfData } from "@/lib/export/pdf-dashboard";
-import type { ConversationPdfData } from "@/lib/export/pdf-conversation";
+// Import types from the dedicated types file (pdf-types.ts) — NOT from
+// pdf-dashboard.ts / pdf-conversation.ts. The latter import jspdf, and
+// Next 14 NFT would otherwise pull jspdf (~880 KB) into every server
+// bundle that renders this client component.
+import type {
+  DashboardPdfData,
+  ConversationPdfData,
+} from "@/lib/export/pdf-types";
 
 type ExportPdfButtonProps =
   | {

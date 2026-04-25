@@ -2,17 +2,17 @@
  * Conversation summary PDF generator with Mieux Assure branding.
  * Summary only - no individual messages (per user decision).
  * Uses dynamic imports to avoid bundle bloat.
+ *
+ * The ConversationPdfData type lives in pdf-types.ts so that client
+ * consumers (e.g. ExportPdfButton) can import it without dragging
+ * jspdf into the server bundle through the Next.js NFT.
  */
 
-import type { Conversation } from "@/types/database";
 import { getScoreLevel, scoreLabelsFr } from "@/lib/utils/scores";
 import { loadLogoAsBase64 } from "@/lib/utils/logo";
 
-export interface ConversationPdfData {
-  conversation: Conversation;
-  tags?: string[];
-  failureReasons: string[];
-}
+export type { ConversationPdfData } from "./pdf-types";
+import type { ConversationPdfData } from "./pdf-types";
 
 export async function generateConversationPdf(data: ConversationPdfData) {
   const { jsPDF } = await import("jspdf");

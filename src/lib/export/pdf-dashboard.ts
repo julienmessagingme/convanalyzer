@@ -1,21 +1,16 @@
 /**
  * Dashboard PDF report generator with Mieux Assure branding.
  * Uses dynamic imports to avoid bundle bloat.
+ *
+ * The DashboardPdfData type lives in pdf-types.ts so that client
+ * consumers (e.g. ExportPdfButton) can import it without dragging
+ * jspdf into the server bundle through the Next.js NFT.
  */
 
 import { loadLogoAsBase64 } from "@/lib/utils/logo";
 
-export interface DashboardPdfData {
-  period: string;
-  metrics: {
-    totalConversations: number;
-    botConversations: number;
-    agentConversations: number;
-    escalatedConversations: number;
-    tauxTransfert: number;
-  };
-  tags: Array<{ label: string; conversation_count: number }>;
-}
+export type { DashboardPdfData } from "./pdf-types";
+import type { DashboardPdfData } from "./pdf-types";
 
 export async function generateDashboardPdf(data: DashboardPdfData) {
   const { jsPDF } = await import("jspdf");
