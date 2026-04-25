@@ -102,7 +102,11 @@ export function Sidebar({
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-60 border-r border-gray-200 bg-white flex flex-col">
-      <Link href={`/${workspaceId}`} className="block px-4 py-5 hover:bg-gray-50 transition-colors">
+      <Link
+        href={`/${workspaceId}`}
+        prefetch={false}
+        className="block px-4 py-5 hover:bg-gray-50 transition-colors"
+      >
         <h1 className="text-lg font-semibold text-gray-900">
           Conversation Analyzer
         </h1>
@@ -132,6 +136,17 @@ export function Sidebar({
             <Link
               key={item.label}
               href={href}
+              // prefetch={false}: the sidebar is fixed and always visible,
+              // so by default Next 14 prefetches the RSC payload of all 9
+              // links on every page load — that's ~9 extra Lambda
+              // invocations per render (visible in Vercel logs as ~15
+              // hits per page). The cost on free tier is significant,
+              // and the benefit is small (each link still navigates fast
+              // because the bundle is already cached client-side after
+              // the first visit). The trade-off: first navigation to a
+              // new section is ~50-100ms slower because the RSC payload
+              // is fetched on click instead of beforehand. Acceptable.
+              prefetch={false}
               className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
                 active
                   ? "bg-gray-100 text-gray-900"
@@ -156,6 +171,7 @@ export function Sidebar({
             {canSwitchWorkspace ? (
               <Link
                 href="/"
+                prefetch={false}
                 className="text-xs text-blue-600 hover:text-blue-700"
               >
                 Changer de workspace

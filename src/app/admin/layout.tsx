@@ -26,8 +26,13 @@ export default async function AdminLayout({
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-6">
+            {/* Same prefetch rationale as sidebar.tsx: this header is
+                always visible on every /admin/* page, so default Next 14
+                prefetch would fire on each render. Disabled to save
+                Lambda invocations. */}
             <Link
               href="/"
+              prefetch={false}
               className="flex items-center gap-2 text-sm font-semibold text-gray-900 hover:text-gray-700"
             >
               <Settings className="h-4 w-4" />
@@ -36,6 +41,7 @@ export default async function AdminLayout({
             <nav className="flex items-center gap-4 text-sm">
               <Link
                 href="/admin/workspaces"
+                prefetch={false}
                 className="flex items-center gap-1.5 text-gray-600 hover:text-gray-900"
               >
                 <Briefcase className="h-4 w-4" />
@@ -43,6 +49,7 @@ export default async function AdminLayout({
               </Link>
               <Link
                 href="/admin/users"
+                prefetch={false}
                 className="flex items-center gap-1.5 text-gray-600 hover:text-gray-900"
               >
                 <Users className="h-4 w-4" />
@@ -53,6 +60,7 @@ export default async function AdminLayout({
           <div className="flex items-center gap-3">
             <Link
               href="/"
+              prefetch={false}
               className="text-sm text-gray-500 hover:text-gray-700"
             >
               ← Retour dashboard
