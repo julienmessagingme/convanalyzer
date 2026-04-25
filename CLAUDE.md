@@ -1,5 +1,18 @@
 # CLAUDE.md — Mieux Assure Analyze
 
+## ⚠️ Workflow Git — TOUJOURS dans le main worktree
+
+**Le main worktree est `C:\Users\julie\convanalyzer\` (Windows) / `/c/Users/julie/convanalyzer` (bash).**
+
+Si la session Claude Code démarre dans `.claude/worktrees/<name>/` (comportement par défaut), **NE PAS** y faire d'edits, builds, ou commits. **Tout doit se passer dans le main worktree.**
+
+Règle opérationnelle :
+
+- **Chaque Bash call qui fait `npm`, `git`, `find .next/`, ou touche des artefacts du repo DOIT commencer par `cd /c/Users/julie/convanalyzer && ...`**
+- Le shell cwd des outils Claude Code peut se reset entre les calls (notamment après un system reminder ou après une longue commande). Ne jamais assumer qu'on reste dans le main — toujours `cd` explicite.
+- **Symptôme de bug si on oublie :** un `npm run build` lancé depuis le worktree utilise un `next.config.mjs` ancien et génère un bundle régressé par rapport aux edits récents. Si une régression apparaît mystérieusement, première chose à vérifier : `pwd` est bien `/c/Users/julie/convanalyzer`.
+- Pour les Edit/Read/Write : utiliser des chemins absolus `C:\Users\julie\convanalyzer\...`. Pas de chemin relatif depuis le worktree.
+
 ## Supabase storage — free tier budget (0,5 GB)
 
 **État au 2026-04-11** : DB à **373 MB** après cleanup. Ingest **coupé** via `INGEST_ENABLED=false` sur Vercel (check dans `src/app/api/ingest/route.ts`, retourne 200 silencieux).

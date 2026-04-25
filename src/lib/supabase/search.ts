@@ -1,6 +1,12 @@
 import { createServiceClient } from "./server";
-import { getOpenAIClient } from "@/lib/openai/client";
 import type { Conversation } from "@/types/database";
+
+// Note: getOpenAIClient is dynamically imported inside
+// searchConversationsBySemantic so that the OpenAI SDK (~100 KB) does
+// not get bundled into every Lambda that imports searchConversations
+// (notably /api/conversations/list which mostly does pure DB work).
+// Webpack splits the dynamic import into its own chunk, loaded only on
+// the first semantic-search call.
 
 export interface ConversationWithMatch {
   conversation: Conversation;
@@ -82,6 +88,7 @@ async function searchConversationsBySemantic(
   const results = new Map<string, { snippet: string; similarity: number }>();
 
   try {
+    const { getOpenAIClient } = await import("@/lib/openai/client");
     const openai = getOpenAIClient();
 
     const embeddingRes = await openai.embeddings.create({
